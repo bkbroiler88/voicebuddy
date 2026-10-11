@@ -64,7 +64,8 @@ static void subVoiceOnly(char *b, size_t n) {
   if (g.pitchHi <= 0) snprintf(b, n, "Run his/her voice setup first");
   else snprintf(b, n, "Ignores grown-ups (%d-%d Hz)", g.pitchLo, g.pitchHi);
 }
-static void subCal(char *b, size_t n) { snprintf(b, n, "Buddy hears %.0f dB now", audioLevelDbfs() + g.calOffset); }
+// subtitle is ~30 characters wide: live reading + the reminder to redo the voice after changing it
+static void subCal(char *b, size_t n) { snprintf(b, n, "Hears %.0f dB. Then redo voice", audioLevelDbfs() + g.calOffset); }
 static void subParents(char *b, size_t n) {
   if (g.nParents <= 0) snprintf(b, n, "None saved yet");
   else snprintf(b, n, "%d saved", g.nParents);
@@ -243,7 +244,7 @@ static SRow tabSetup[] = {
   ACT("First-time setup", nullptr, subSetup, "Start", nullptr, aFull),
   ACT("Redo his/her voice only", "If he/she has grown or it's off", nullptr, "Start", nullptr, aVoice),
   ACT("Redo room zones only", "After moving furniture or Buddy", nullptr, "Start", nullptr, aZones),
-  PM("Match a phone dB meter", nullptr, subCal, &g.calOffset, 60, 140, 1, fNum, nullptr),
+  PM("Calibrate dB readings", nullptr, subCal, &g.calOffset, 60, 140, 1, fNum, nullptr),
   ACT("Grown-up voices", nullptr, subParents, "Add", nullptr, aParent),
   ACT("Factory reset", "Erase everything and start over", nullptr, "Reset", nullptr, aFactory),
 };

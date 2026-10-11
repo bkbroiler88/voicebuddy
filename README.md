@@ -49,7 +49,7 @@ Hold the top-right corner for 3 seconds, then enter the PIN (default `1234`, cha
 - **Room:** adjust for distance, live zone check, far-away adjustment, louder room higher line, WiFi & web control
 - **Stars:** time per star, daily goal, loud empties the star bar, chime, reset
 - **Screen:** brightness, LED glow, nap timer, start view, parent PIN
-- **Setup:** first-time setup, redo voice or zones only, phone dB meter match, grown-up voices, **factory reset**
+- **Setup:** first-time setup, redo voice or zones only, calibrate dB readings, grown-up voices, **factory reset**
 
 ## Web control (optional)
 
