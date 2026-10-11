@@ -36,7 +36,9 @@ static char toast[48] = "";
 static uint32_t toastMs = 0;
 static int napMin;                          // g.sleepAfter shown in minutes
 static bool qrMode = false;                 // full-screen QR code over the web page
+static bool resetMode = false;              // factory reset confirmation
 
+static void aFactory();
 static void say(const char *m) { strncpy(toast, m, sizeof(toast) - 1); toastMs = millis(); }
 
 // ---------------- formatters / live text ----------------
@@ -110,6 +112,38 @@ static void aParent() {
 }
 static void drawAll();
 static void aWebPage() { settingsEnter(TAB_WEB); }
+
+static void drawResetConfirm() {
+  tft.fillScreen(C_SCREEN);
+  tft.fillRect(0, 0, 320, 28, C_LOUD);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(C_BTN_TX, C_LOUD);
+  tft.drawString("Factory reset", 160, 14, 2);
+  tft.setTextColor(C_TEXT, C_SCREEN);
+  tft.drawString("Erase everything?", 160, 54, 4);
+  const char *lines[5] = {"Settings, PIN and stars", "WiFi and room zones", "His/her voice and grown-up voices",
+                          "History and signed-in browsers", "The web certificate"};
+  tft.setTextDatum(ML_DATUM);
+  for (int i = 0; i < 5; i++) {
+    tft.fillCircle(52, 84 + i * 20, 3, C_LOUD);
+    tft.drawString(lines[i], 62, 84 + i * 20, 2);
+  }
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(C_DIM, C_SCREEN);
+  tft.drawString("Buddy restarts into first-time setup.", 160, 186, 2);
+  drawButton(10, 204, 140, 32, "Cancel", C_OFF, C_BTN_TX);
+  drawButton(170, 204, 140, 32, "Erase everything", C_LOUD, C_BTN_TX);
+}
+
+static void aFactory() { resetMode = true; drawResetConfirm(); }
+
+static void doFactoryReset() {
+  tft.fillScreen(C_SCREEN);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(C_TEXT, C_SCREEN);
+  tft.drawString("Erasing...", 160, 120, 4);
+  factoryReset();   // main.cpp: wipes NVS + storage, then restarts
+}
 static void aSignOutAll() { webRevokeAll(); say("All browsers signed out"); }
 
 // QR: the ESP-IDF encoder hands us the finished code through this callback
@@ -211,15 +245,20 @@ static SRow tabSetup[] = {
   ACT("Redo room zones only", "After moving furniture or Buddy", nullptr, "Start", nullptr, aZones),
   PM("Match a phone dB meter", nullptr, subCal, &g.calOffset, 60, 140, 1, fNum, nullptr),
   ACT("Grown-up voices", nullptr, subParents, "Add", nullptr, aParent),
+  ACT("Factory reset", "Erase everything and start over", nullptr, "Reset", nullptr, aFactory),
 };
 
 struct Tab { const char *name; SRow *rows; int n; };
 static Tab tabs[NTABS + 1] = {
-  {"Voice", tabVoice, 5}, {"Room", tabRoom, 5}, {"Stars", tabStars, 5}, {"Screen", tabScreen, 5}, {"Setup", tabSetup, 5},
+  {"Voice", tabVoice, 5}, {"Room", tabRoom, 5}, {"Stars", tabStars, 5}, {"Screen", tabScreen, 5}, {"Setup", tabSetup, 6},
   {"WiFi & web control", tabWeb, 5},
 };
 
-#define ROW_Y(i) (32 + (i) * 35)
+// 5 rows use a 35 px pitch; a 6-row tab tightens to 29 px
+static int pitch() { return tabs[curTab].n > 5 ? 29 : 35; }
+static int ROW_Y(int i) { return 32 + i * pitch(); }
+static int ctlY(int y) { return y + (pitch() > 30 ? 5 : 3); }
+static int ctlH() { return pitch() > 30 ? 24 : 22; }
 #define TAB_W 64
 
 // ---------------- drawing ----------------
@@ -229,10 +268,11 @@ static void drawSub(int i) {
   char b[56];
   if (r.subFn) r.subFn(b, sizeof(b)); else snprintf(b, sizeof(b), "%s", r.sub ? r.sub : "");
   int textW = (r.kind == K_PM) ? 186 : (r.kind == K_TOG ? 222 : (r.kind == K_INFO ? 200 : 202));
-  tft.fillRect(6, y + 21, textW, 10, C_SCREEN);
+  int sy = y + (pitch() > 30 ? 21 : 18);
+  tft.fillRect(6, sy, textW, 10, C_SCREEN);
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(C_DIM, C_SCREEN);
-  tft.drawString(b, 8, y + 22, 1);
+  tft.drawString(b, 8, sy + 1, 1);
 }
 
 static void drawControl(int i) {
@@ -242,24 +282,24 @@ static void drawControl(int i) {
   switch (r.kind) {
     case K_PM:
       r.fmt(*r.val, b, sizeof(b));
-      tft.fillRect(233, y + 3, 46, 28, C_SCREEN);
+      tft.fillRect(233, y + 2, 46, pitch() - 4, C_SCREEN);
       tft.setTextDatum(MC_DATUM);
       tft.setTextColor(C_TEXT, C_SCREEN);
-      tft.drawString(b, 256, y + 17, 2);
+      tft.drawString(b, 256, ctlY(y) + ctlH() / 2, 2);
       break;
     case K_TOG:
-      drawButton(232, y + 5, 80, 24, *r.flag ? "ON" : "OFF", *r.flag ? C_ON : C_OFF, C_BTN_TX);
+      drawButton(232, ctlY(y), 80, ctlH(), *r.flag ? "ON" : "OFF", *r.flag ? C_ON : C_OFF, C_BTN_TX);
       break;
     case K_ACT:
       if (r.btnFn) r.btnFn(b, sizeof(b)); else snprintf(b, sizeof(b), "%s", r.btn);
-      drawButton(212, y + 5, 100, 24, b, C_BTN, C_BTN_TX);
+      drawButton(212, ctlY(y), 100, ctlH(), b, r.act == aFactory ? C_LOUD : C_BTN, C_BTN_TX);
       break;
     case K_INFO:
       r.btnFn(b, sizeof(b));
-      tft.fillRect(206, y + 3, 110, 28, C_SCREEN);
+      tft.fillRect(206, y + 2, 110, pitch() - 4, C_SCREEN);
       tft.setTextDatum(MR_DATUM);
       tft.setTextColor(C_TEXT, C_SCREEN);
-      tft.drawString(b, 312, y + 17, 2);
+      tft.drawString(b, 312, ctlY(y) + ctlH() / 2, 2);
       break;
   }
 }
@@ -267,17 +307,17 @@ static void drawControl(int i) {
 static void drawRow(int i) {
   SRow &r = tabs[curTab].rows[i];
   int y = ROW_Y(i);
-  tft.fillRect(0, y, 320, 34, C_SCREEN);
+  tft.fillRect(0, y, 320, pitch() - 1, C_SCREEN);
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(C_TEXT, C_SCREEN);
-  tft.drawString(r.label, 8, y + 4, 2);
+  tft.drawString(r.label, 8, y + (pitch() > 30 ? 4 : 1), 2);
   if (r.kind == K_PM) {
-    drawButton(196, y + 5, 36, 24, "-", C_BTN, C_BTN_TX);
-    drawButton(280, y + 5, 36, 24, "+", C_BTN, C_BTN_TX);
+    drawButton(196, ctlY(y), 36, ctlH(), "-", C_BTN, C_BTN_TX);
+    drawButton(280, ctlY(y), 36, ctlH(), "+", C_BTN, C_BTN_TX);
   }
   drawSub(i);
   drawControl(i);
-  tft.drawFastHLine(6, y + 34, 308, C_PANEL);
+  tft.drawFastHLine(6, y + pitch() - 1, 308, C_PANEL);
 }
 
 static void drawFooter() {
@@ -320,11 +360,12 @@ static void drawAll() {
 }
 
 // ---------------- public ----------------
-void settingsRedraw() { if (!qrMode) drawAll(); }
+void settingsRedraw() { if (!qrMode && !resetMode) drawAll(); }
 
 void settingsEnter(int tab) {
   screen = SCR_SETTINGS;
   qrMode = false;
+  resetMode = false;
   curTab = constrain(tab, 0, NTABS);
   napMin = max(1, g.sleepAfter / 60);
   toast[0] = 0;
@@ -334,6 +375,11 @@ void settingsEnter(int tab) {
 
 bool settingsTap(int x, int y) {
   if (qrMode) { qrMode = false; drawAll(); return false; }
+  if (resetMode) {
+    if (y >= 200 && x >= 166) doFactoryReset();
+    else if (y >= 200 && x < 154) { resetMode = false; drawAll(); }
+    return false;
+  }
   if (curTab == TAB_WEB && y < 28) {
     if (x < 50) { curTab = TAB_ROOM; drawAll(); }
     return false;
@@ -346,7 +392,7 @@ bool settingsTap(int x, int y) {
   if (y >= 208 && x >= 236) { settingsSave(); applyVad(); enterChild(); return false; }
   for (int i = 0; i < tabs[curTab].n; i++) {
     int ry = ROW_Y(i);
-    if (y < ry || y >= ry + 35) continue;
+    if (y < ry || y >= ry + pitch()) continue;
     SRow &r = tabs[curTab].rows[i];
     switch (r.kind) {
       case K_PM:
@@ -367,7 +413,7 @@ bool settingsTap(int x, int y) {
       case K_ACT:
         if (x < 208) return false;
         r.act();
-        if (screen == SCR_SETTINGS && !qrMode && tabs[curTab].rows == tabs[curTab].rows) { drawControl(i); drawSub(i); drawFooter(); }
+        if (screen == SCR_SETTINGS && !qrMode && !resetMode) { drawControl(i); drawSub(i); drawFooter(); }
         return false;
       case K_INFO:
         return false;
@@ -378,7 +424,7 @@ bool settingsTap(int x, int y) {
 
 void settingsTick() {
   static uint32_t last = 0;
-  if (qrMode || millis() - last < 300) return;
+  if (qrMode || resetMode || millis() - last < 300) return;
   last = millis();
   if (curTab == TAB_WEB)
     for (int i = 0; i < tabs[curTab].n; i++) if (tabs[curTab].rows[i].kind == K_INFO) drawControl(i);

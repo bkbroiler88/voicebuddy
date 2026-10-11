@@ -19,6 +19,7 @@ void enterPinSet();             // change-PIN pad; returns to the Screen setting
 void applyVad();                // push speech settings + his/her pitch band to the audio task
 void applyBrightness();
 void resetStarProgress();
+void factoryReset();            // erase NVS + storage and restart into first-time setup
 float currentLimitDb();         // the too-loud line right now (distance + room adjusted)
 float currentLevelDb();         // what the meter shows right now
 

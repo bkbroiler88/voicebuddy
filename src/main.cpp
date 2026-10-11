@@ -15,6 +15,7 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#include <WiFi.h>
 #include <TFT_eSPI.h>
 #include <Adafruit_NeoPixel.h>
 #include <math.h>
@@ -32,6 +33,8 @@
 #include "history.h"
 #include "version.h"
 #include <esp_ota_ops.h>
+#include <nvs_flash.h>
+#include <LittleFS.h>
 
 TFT_eSPI tft;
 static TFT_eSprite sprBuddy(&tft);
@@ -209,6 +212,17 @@ void enterChild() {
 }
 
 void resetStarProgress() { starProgress = 0; }
+
+void factoryReset() {
+  Serial.println("[reset] factory reset: erasing settings, WiFi, zones, history, certificate");
+  WiFi.disconnect(true, true);      // also drops the driver's saved credentials
+  WiFi.mode(WIFI_OFF);
+  delay(100);
+  LittleFS.format();                // certificate, sessions, history
+  nvs_flash_erase();                // settings, WiFi login, zone model, PIN
+  delay(200);
+  ESP.restart();
+}
 
 // bedtime: during quiet hours the quiet line replaces the normal line
 static bool quietHoursNow() {
@@ -604,6 +618,17 @@ static void serviceNet() {
   if (conn && !csiRunning()) csiStart();
   else if (!conn && csiRunning()) csiStop();
   if (conn && !timeStarted) { timeBegin(); timeStarted = true; }   // clock for history + schedule
+
+  // the driver's own auto-reconnect sometimes gives up; kick it every 20 s while offline
+  static uint32_t offlineSince = 0;
+  if (conn || !netHasCreds()) offlineSince = 0;
+  else if (!offlineSince) offlineSince = millis();
+  else if (millis() - offlineSince > 20000) {
+    Serial.printf("[net] not connected (status %d), retrying %s\n", (int)WiFi.status(), netSsid());
+    WiFi.disconnect();
+    netBegin();
+    offlineSince = millis();
+  }
 }
 
 // ---------------- new web sign-in notice ----------------
@@ -831,11 +856,12 @@ void loop() {
   if (now - lastLog > 1000) {
     lastLog = now;
     Serial.printf("[lvl] %.0f dB  speech %.0f dB %s %.0fHz (%.2f)  noise %.0f dB  line %.0f  mood %d  "
-                  "zone %s %.0f%% (live %s)  %dpps motion %.2f  stars %d prog %.0f/%d  heap %u psram %u\n",
+                  "zone %s %.0f%% (live %s)  %dpps motion %.2f  stars %d prog %.0f/%d  heap %u psram %u  wifi %d web %d\n",
                   audioLevelDbfs() + g.calOffset, audioSpeechDbfs() + g.calOffset,
                   audioSpeechActive() ? "VOICE" : "-", audioPitchHz(), audioVoicing(), audioNoiseDbfs() + g.calOffset,
                   limitNow(), (int)mood, zoneName(csiZone()), csiConfidence() * 100, zoneName(csiLiveZone()),
-                  csiPps(), csiMotion(), g.stars, starProgress, g.starEvery, ESP.getFreeHeap(), ESP.getFreePsram());
+                  csiPps(), csiMotion(), g.stars, starProgress, g.starEvery, ESP.getFreeHeap(), ESP.getFreePsram(),
+                  (int)WiFi.status(), (int)webRunning());
   }
   delay(2);
 }
