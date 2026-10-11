@@ -2,7 +2,7 @@
 #include <Preferences.h>
 #include <stddef.h>
 
-#define SETTINGS_VERSION 8
+#define SETTINGS_VERSION 9
 
 Settings g;
 static Preferences prefs;
@@ -38,6 +38,14 @@ void settingsDefaults() {
   g.bubbles    = true;
   g.lombard    = true;
   g.roomNoiseDb = 35;
+  g.webOn      = false;
+  g.resetOn    = true;
+  g.resetMin   = 7 * 60;
+  g.quietOn    = false;
+  g.quietFromMin = 19 * 60 + 30;
+  g.quietToMin = 7 * 60;
+  g.quietLine  = 64;
+  strcpy(g.tz, "EST5EDT,M3.2.0,M11.1.0");
 }
 
 // Fields are only ever appended, so an older blob is a valid prefix of the current
@@ -48,6 +56,7 @@ static size_t blobSizeForVersion(uint32_t v) {
     case 5: return offsetof(Settings, pitchLo);
     case 6: return offsetof(Settings, bubbles);
     case 7: return offsetof(Settings, setupDone);
+    case 8: return offsetof(Settings, webOn);
     case SETTINGS_VERSION: return sizeof(Settings);
     default: return 0;
   }

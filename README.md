@@ -39,6 +39,31 @@ Runs automatically on first boot (about 3 minutes), or from Settings › Setup:
 
 **Parent settings:** hold the top-right corner for 3 seconds, then enter the PIN (default `1234`, change it under Screen).
 
+## Web control (optional)
+
+Turn on **Settings › Room › WiFi & web control › Web control** and open `https://voicebuddy.local` (or scan the QR code on Buddy) from a phone or laptop on the same WiFi. Sign in with the parent PIN.
+
+- Live voice level, today's stars, give a star, send a speech bubble, switch Buddy's screen, pause Buddy
+- History (today's voice level and loud moments, stars per day for a week)
+- All settings, plus a morning star reset and bedtime quiet hours
+- Signed-in browsers, settings backup/restore, restart, firmware updates
+
+**Security:** HTTPS only, with a certificate Buddy creates for itself on first use. The browser warns once because no public authority vouches for it: check that the fingerprint matches the one on Buddy's QR screen. Sessions last 30 days, 5 wrong PINs lock sign-in for 5 minutes, and Buddy shows a notice whenever a new browser signs in. Web control is off by default, and Buddy works the same without it.
+
+## Firmware updates over WiFi (signed)
+
+Buddy only installs updates signed with the owner's key, and keeps the old version in the other app slot. A new version has to run healthily for 30 seconds or the bootloader switches back.
+
+```
+python tools/keygen.py          # once: keys/signing_key.pem (keep it private + backed up)
+pio run
+python tools/sign_firmware.py   # -> bin/voicebuddy-<version>.signed.bin
+```
+
+Then upload the `.signed.bin` on the web page under Device › Update firmware. The public key in `src/signing_pubkey.h` is compiled into the firmware. If you build your own copy, run `keygen.py --force` to use your own key, then flash once over USB.
+
+Flash layout (16 MB): nvs 20 KB · otadata · app0 6.25 MB · app1 6.25 MB · storage 3.4 MB (certificate, sessions, history) · coredump.
+
 ## Flash it
 
 **Easiest:** flash [`bin/voicebuddy-es3c28p.bin`](bin/voicebuddy-es3c28p.bin) at address **0x0**, for example with [ESP Web Flasher](https://esptool.spacehuhn.com/), or:
@@ -71,4 +96,4 @@ Core 0 runs audio and pitch detection plus CSI sensing; Core 1 only draws. Scree
 
 ## Serial commands (115200)
 
-`d` codec register dump · `S<view><mood>` force a screen · `W<mode>` open a setup step · `T<tab>` open a settings tab · `P` dump the screen · `X` back to normal
+`d` codec register dump · `S<view><mood>` force a screen · `W<mode>` open a setup step · `T<tab>` open a settings tab · `E1`/`E0` web control on/off · `P` dump the screen · `X` back to normal

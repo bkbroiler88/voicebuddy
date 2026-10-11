@@ -6,12 +6,16 @@
 #include "audio.h"
 #include "csi.h"
 #include "wifi_net.h"
+#include "web.h"
+#include "certs.h"
+#include <WiFi.h>
+#include "qrcode.h"   // ESP-IDF QR encoder
 
 typedef void (*TextFn)(char *, size_t);
 typedef void (*ActFn)();
 typedef void (*FmtFn)(int, char *, size_t);
 
-enum Kind : uint8_t { K_PM, K_TOG, K_ACT };
+enum Kind : uint8_t { K_PM, K_TOG, K_ACT, K_INFO };   // K_INFO: read-only text on the right (btnFn)
 struct SRow {
   Kind kind;
   const char *label;
@@ -25,11 +29,13 @@ struct SRow {
 #define PM(l, s, sf, v, mn, mx, st, f, cb) {K_PM, l, s, sf, v, mn, mx, st, f, nullptr, nullptr, nullptr, nullptr, cb}
 #define TOG(l, s, sf, p, cb)               {K_TOG, l, s, sf, nullptr, 0, 0, 0, nullptr, p, nullptr, nullptr, nullptr, cb}
 #define ACT(l, s, sf, b, bf, a)            {K_ACT, l, s, sf, nullptr, 0, 0, 0, nullptr, nullptr, b, bf, a, nullptr}
+#define INFO(l, s, sf, bf)                 {K_INFO, l, s, sf, nullptr, 0, 0, 0, nullptr, nullptr, nullptr, bf, nullptr, nullptr}
 
 static int curTab = 0;
 static char toast[48] = "";
 static uint32_t toastMs = 0;
 static int napMin;                          // g.sleepAfter shown in minutes
+static bool qrMode = false;                 // full-screen QR code over the web page
 
 static void say(const char *m) { strncpy(toast, m, sizeof(toast) - 1); toastMs = millis(); }
 
@@ -63,6 +69,25 @@ static void subParents(char *b, size_t n) {
 }
 static void subSetup(char *b, size_t n) { snprintf(b, n, g.setupDone ? "Room, zones and voices (3 min)" : "Not finished yet (3 min)"); }
 
+static void subWifiWeb(char *b, size_t n) {
+  if (!netHasCreds()) snprintf(b, n, "Not set up");
+  else snprintf(b, n, "%.16s - web %s", netSsid(), g.webOn ? (webRunning() ? "on" : "starting") : "off");
+}
+static void subWebOn(char *b, size_t n) {
+  if (!g.webOn) snprintf(b, n, "Off: nothing listens on the network");
+  else if (!netConnected()) snprintf(b, n, "On, waiting for WiFi");
+  else snprintf(b, n, "Parents can use a phone on this WiFi");
+}
+static void subAddr(char *b, size_t n) { snprintf(b, n, webRunning() ? "https://voicebuddy.local" : "-"); }
+static void btnIp(char *b, size_t n) {
+  if (webRunning()) snprintf(b, n, "%s", WiFi.localIP().toString().c_str()); else b[0] = 0;
+}
+static void subQr(char *b, size_t n) { snprintf(b, n, webRunning() ? "QR code + certificate check" : "Turn web control on first"); }
+static void subSess(char *b, size_t n) {
+  int k = webSessionCount();
+  if (k == 0) snprintf(b, n, "None"); else snprintf(b, n, "%d signed in", k);
+}
+
 static const char *const VIEWS[4] = {"Pup", "Dial", "Saturn", "Planets"};
 static void btnView(char *b, size_t n) { snprintf(b, n, "%s", VIEWS[constrain(g.view, 0, 3)]); }
 
@@ -83,6 +108,59 @@ static void aParent() {
   if (g.childP10 <= 0) { say("Do his/her voice setup first"); return; }
   wizardEnter(WIZ_GROWNUP);
 }
+static void drawAll();
+static void aWebPage() { settingsEnter(TAB_WEB); }
+static void aSignOutAll() { webRevokeAll(); say("All browsers signed out"); }
+
+// QR: the ESP-IDF encoder hands us the finished code through this callback
+static void drawQrModules(esp_qrcode_handle_t q) {
+  int n = esp_qrcode_get_size(q);
+  int px = max(2, 132 / (n + 2));
+  int size = px * (n + 2), x0 = (320 - size) / 2, y0 = 36;
+  tft.fillRect(x0, y0, size, size, TFT_WHITE);
+  for (int y = 0; y < n; y++)
+    for (int x = 0; x < n; x++)
+      if (esp_qrcode_get_module(q, x, y)) tft.fillRect(x0 + (x + 1) * px, y0 + (y + 1) * px, px, px, TFT_BLACK);
+}
+
+static void drawQr() {
+  tft.fillScreen(C_SCREEN);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(C_TEXT, C_SCREEN);
+  tft.drawString("Scan to open Buddy's page", 160, 18, 2);
+  char url[48];
+  snprintf(url, sizeof(url), "https://%s/", WiFi.localIP().toString().c_str());
+  esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
+  cfg.display_func = drawQrModules;
+  cfg.max_qrcode_version = 6;
+  cfg.qrcode_ecc_level = ESP_QRCODE_ECC_MED;
+  esp_qrcode_generate(&cfg, url);
+  tft.setTextColor(C_TEXT, C_SCREEN);
+  tft.drawString(url, 160, 184, 2);
+  char fp[40];
+  snprintf(fp, sizeof(fp), "Certificate ends %s", certFingerprintShort());
+  tft.setTextColor(C_DIM, C_SCREEN);
+  tft.drawString(fp, 160, 202, 2);
+  drawButton(210, 212, 100, 26, "Back", C_BTN, C_BTN_TX);
+}
+
+static void aQr() {
+  if (!webRunning()) { say("Turn on web control first (needs WiFi)"); return; }
+  qrMode = true;
+  drawQr();
+}
+
+static void cWeb() {
+  if (g.webOn) {
+    tft.fillRect(0, 210, 236, 30, C_SCREEN);
+    tft.setTextDatum(ML_DATUM);
+    tft.setTextColor(C_BTN, C_SCREEN);
+    tft.drawString("Creating certificate...", 8, 226, 2);
+    if (!certEnsure()) { g.webOn = false; say("Couldn't create the certificate"); }
+  }
+  settingsSave();
+}
+
 static void cDist() {
   if (g.distOn && !csiModelReady()) say("Set up room zones to use this");
 }
@@ -104,7 +182,14 @@ static SRow tabRoom[] = {
   ACT("Where is he/she?", nullptr, subWhere, "Check", nullptr, aCheck),
   PM("Far-away adjustment", "Measured during setup", nullptr, &g.farOffset, -20, 0, 1, fDb, cFar),
   TOG("Louder room, higher line", "Allow a bit more over the TV", nullptr, &g.lombard, nullptr),
+  ACT("WiFi & web control", nullptr, subWifiWeb, "Open", nullptr, aWebPage),
+};
+static SRow tabWeb[] = {
   ACT("WiFi", nullptr, subWifi, "Change", nullptr, aWifi),
+  TOG("Web control", nullptr, subWebOn, &g.webOn, cWeb),
+  INFO("Address", nullptr, subAddr, btnIp),
+  ACT("Connect a phone", nullptr, subQr, "Show QR", nullptr, aQr),
+  ACT("Signed-in browsers", nullptr, subSess, "Sign out", nullptr, aSignOutAll),
 };
 static SRow tabStars[] = {
   PM("Star every", "His/her voice time per star", nullptr, &g.starEvery, 15, 300, 5, fSec, nullptr),
@@ -129,8 +214,9 @@ static SRow tabSetup[] = {
 };
 
 struct Tab { const char *name; SRow *rows; int n; };
-static Tab tabs[NTABS] = {
+static Tab tabs[NTABS + 1] = {
   {"Voice", tabVoice, 5}, {"Room", tabRoom, 5}, {"Stars", tabStars, 5}, {"Screen", tabScreen, 5}, {"Setup", tabSetup, 5},
+  {"WiFi & web control", tabWeb, 5},
 };
 
 #define ROW_Y(i) (32 + (i) * 35)
@@ -142,7 +228,7 @@ static void drawSub(int i) {
   int y = ROW_Y(i);
   char b[56];
   if (r.subFn) r.subFn(b, sizeof(b)); else snprintf(b, sizeof(b), "%s", r.sub ? r.sub : "");
-  int textW = (r.kind == K_PM) ? 186 : (r.kind == K_TOG ? 222 : 202);
+  int textW = (r.kind == K_PM) ? 186 : (r.kind == K_TOG ? 222 : (r.kind == K_INFO ? 200 : 202));
   tft.fillRect(6, y + 21, textW, 10, C_SCREEN);
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(C_DIM, C_SCREEN);
@@ -167,6 +253,13 @@ static void drawControl(int i) {
     case K_ACT:
       if (r.btnFn) r.btnFn(b, sizeof(b)); else snprintf(b, sizeof(b), "%s", r.btn);
       drawButton(212, y + 5, 100, 24, b, C_BTN, C_BTN_TX);
+      break;
+    case K_INFO:
+      r.btnFn(b, sizeof(b));
+      tft.fillRect(206, y + 3, 110, 28, C_SCREEN);
+      tft.setTextDatum(MR_DATUM);
+      tft.setTextColor(C_TEXT, C_SCREEN);
+      tft.drawString(b, 312, y + 17, 2);
       break;
   }
 }
@@ -196,6 +289,7 @@ static void drawFooter() {
     case TAB_ROOM:   snprintf(b, sizeof(b), "Room background: %.0f dB", audioNoiseDbfs() + g.calOffset); break;
     case TAB_STARS:  snprintf(b, sizeof(b), "Today: %d of %d stars", g.stars, g.dailyGoal); break;
     case TAB_SCREEN: snprintf(b, sizeof(b), "Saved when you tap Done"); break;
+    case TAB_WEB:    snprintf(b, sizeof(b), g.webOn ? "Sign-in uses the parent PIN" : "Buddy works the same with it off"); break;
     default:         snprintf(b, sizeof(b), g.setupDone ? "Setup is done" : "Setup isn't finished yet"); break;
   }
   tft.fillRect(0, 210, 236, 30, C_SCREEN);
@@ -206,7 +300,14 @@ static void drawFooter() {
 
 static void drawAll() {
   tft.fillScreen(C_SCREEN);
-  for (int i = 0; i < NTABS; i++) {
+  if (curTab == TAB_WEB) {
+    tft.fillRect(0, 0, 320, 28, C_TAB);
+    drawButton(4, 3, 40, 22, "<", rgb(125, 140, 166), C_BTN_TX);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(C_BTN_TX, C_TAB);
+    tft.drawString(tabs[TAB_WEB].name, 160, 14, 2);
+  }
+  else for (int i = 0; i < NTABS; i++) {
     bool on = i == curTab;
     tft.fillRect(i * TAB_W, 0, TAB_W, 28, on ? C_TAB : C_PANEL);
     tft.setTextDatum(MC_DATUM);
@@ -219,9 +320,12 @@ static void drawAll() {
 }
 
 // ---------------- public ----------------
+void settingsRedraw() { if (!qrMode) drawAll(); }
+
 void settingsEnter(int tab) {
   screen = SCR_SETTINGS;
-  curTab = constrain(tab, 0, NTABS - 1);
+  qrMode = false;
+  curTab = constrain(tab, 0, NTABS);
   napMin = max(1, g.sleepAfter / 60);
   toast[0] = 0;
   setPixel(0, 0, 0);
@@ -229,6 +333,11 @@ void settingsEnter(int tab) {
 }
 
 bool settingsTap(int x, int y) {
+  if (qrMode) { qrMode = false; drawAll(); return false; }
+  if (curTab == TAB_WEB && y < 28) {
+    if (x < 50) { curTab = TAB_ROOM; drawAll(); }
+    return false;
+  }
   if (y < 28) {
     int t = x / TAB_W;
     if (t >= 0 && t < NTABS && t != curTab) { curTab = t; drawAll(); }
@@ -258,7 +367,9 @@ bool settingsTap(int x, int y) {
       case K_ACT:
         if (x < 208) return false;
         r.act();
-        if (screen == SCR_SETTINGS) { drawControl(i); drawSub(i); drawFooter(); }
+        if (screen == SCR_SETTINGS && !qrMode && tabs[curTab].rows == tabs[curTab].rows) { drawControl(i); drawSub(i); drawFooter(); }
+        return false;
+      case K_INFO:
         return false;
     }
   }
@@ -267,8 +378,10 @@ bool settingsTap(int x, int y) {
 
 void settingsTick() {
   static uint32_t last = 0;
-  if (millis() - last < 300) return;
+  if (qrMode || millis() - last < 300) return;
   last = millis();
+  if (curTab == TAB_WEB)
+    for (int i = 0; i < tabs[curTab].n; i++) if (tabs[curTab].rows[i].kind == K_INFO) drawControl(i);
   for (int i = 0; i < tabs[curTab].n; i++) if (tabs[curTab].rows[i].subFn) drawSub(i);
   drawFooter();
 }

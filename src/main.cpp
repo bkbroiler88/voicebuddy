@@ -27,6 +27,11 @@
 #include "wifi_net.h"
 #include "buddy.h"
 #include "ui.h"
+#include "web.h"
+#include "certs.h"
+#include "history.h"
+#include "version.h"
+#include <esp_ota_ops.h>
 
 TFT_eSPI tft;
 static TFT_eSprite sprBuddy(&tft);
@@ -60,6 +65,8 @@ enum Voice { V_QUIET, V_NICE, V_ALERT, V_LOUD };
 static Voice vs = V_QUIET;
 static float loudT = 0, alertT = 0, exitT = 0, talkHold = 0, quietT = 0;
 static float proudT = 0, celebrateT = 0, starProgress = 0;
+static uint32_t loudStartMs = 0;  // current loud moment, for the history log
+static float loudPeak = 0;
 static float distOffset = 0;     // glided dB offset from the zone
 static float lvlSpl = 0;         // approx dB SPL
 static Mood mood = M_CALM;
@@ -191,6 +198,7 @@ static void earnStar() {
   if (g.stars == g.dailyGoal) celebrateT = CELEBRATE_SHOW_S;
   if (g.chime) audioChime();
   settingsSave();
+  histStar();
   Serial.printf("[star] %d/%d\n", g.stars, g.dailyGoal);
 }
 
@@ -202,7 +210,15 @@ void enterChild() {
 
 void resetStarProgress() { starProgress = 0; }
 
-static float limitNow() { return g.loudDb + distOffset + lombardBonus(); }
+// bedtime: during quiet hours the quiet line replaces the normal line
+static bool quietHoursNow() {
+  if (!g.quietOn) return false;
+  int m = minuteOfDay();
+  if (m < 0) return false;
+  int a = g.quietFromMin, b = g.quietToMin;
+  return a <= b ? (m >= a && m < b) : (m >= a || m < b);
+}
+static float limitNow() { return (quietHoursNow() ? g.quietLine : g.loudDb) + distOffset + lombardBonus(); }
 float currentLimitDb() { return limitNow(); }
 float currentLevelDb() { return (g.speechOnly ? audioSpeechDbfs() : audioLevelDbfs()) + g.calOffset; }
 
@@ -214,11 +230,17 @@ static void updateVoice(float dt, float effLoud, float effWarn, float effFloor) 
 
   if (vs == V_LOUD) {
     if (lvlSpl < effLoud - LOUD_EXIT_HYST_DB) exitT += dt; else exitT = 0;
-    if (exitT >= LOUD_EXIT_S) { vs = V_ALERT; exitT = 0; }
+    loudPeak = fmaxf(loudPeak, lvlSpl);
+    if (exitT >= LOUD_EXIT_S) {
+      vs = V_ALERT; exitT = 0;
+      int secs = (int)((millis() - loudStartMs) / 1000) - (int)LOUD_EXIT_S;
+      histLoud((int)lroundf(loudPeak), max(1, secs));
+    }
   } else {
     if (lvlSpl > effLoud) loudT += dt; else loudT = 0;
     if (loudT >= LOUD_ENTER_S) {
       vs = V_LOUD; loudT = alertT = exitT = 0;
+      loudStartMs = millis(); loudPeak = lvlSpl;
       if (g.loudResets) starProgress = 0;
       Serial.printf("[voice] loud %.0f dB (limit %.0f)\n", lvlSpl, effLoud);
     } else if (vs == V_ALERT) {
@@ -265,6 +287,11 @@ static float bubbleLeft = 0;     // seconds; >= 1000 means "while this mood last
 static Mood prevMood = M_CALM;
 static float praiseT = 0;
 static int demoMood = -1;        // >= 0: mood forced over serial for screenshots
+static bool paused = false;      // "Pause Buddy" from the parent page
+static float parentMsgLeft = 0;  // seconds a parent's bubble keeps its "from a parent" tag
+static char noticeText[48] = "";  // "label|ip|sessionId" of a new web sign-in
+static bool noticePending = false;
+static uint32_t restartAt = 0;
 
 static void say(const char *text, float secs) { bubble = text; bubbleLeft = secs; }
 
@@ -299,6 +326,16 @@ static void updateBubble(float dt) {
   }
 }
 
+// small label so the child knows a bubble came from a parent's phone
+static void parentTag(TFT_eSprite &s) {
+  const char *t = "from a parent";
+  int w = s.textWidth(t, 2) + 16, x = (s.width() - w) / 2, y = s.height() - 30;
+  s.fillRoundRect(x, y, w, 20, 10, rgb(90, 110, 140));
+  s.setTextDatum(MC_DATUM);
+  s.setTextColor(TFT_WHITE, rgb(90, 110, 140));
+  s.drawString(t, x + w / 2, y + 11, 2);
+}
+
 static void childFrame(float dt) {
   float target = zoneOffset(csiZone());
   float step = OFFSET_GLIDE_DB_S * dt;
@@ -320,10 +357,19 @@ static void childFrame(float dt) {
       case M_SLEEPY: lvlSpl = effFloor - 4; break;
       default:       lvlSpl = (effFloor + effWarn) / 2; break;
     }
+  } else if (paused) {
+    mood = M_SLEEPY;                  // napping: nothing is counted
   } else {
     updateVoice(dt, effLoud, effWarn, effFloor);
     updateBubble(dt);
   }
+  if (parentMsgLeft > 0) {
+    parentMsgLeft -= dt;
+    if (parentMsgLeft <= 0 && paused) bubble = nullptr;
+  }
+  webStatus.level = lvlSpl; webStatus.line = effLoud; webStatus.warn = effWarn;
+  webStatus.mood = mood; webStatus.paused = paused;
+  webStatus.prog = constrain(starProgress / max(1, g.starEvery), 0.f, 1.f);
 
   // animation targets
   animT += dt;
@@ -353,20 +399,24 @@ static void childFrame(float dt) {
     case V_DIAL:
       drawDial(sprDial, mood, a, kOf(lvlSpl), kOf(effWarn), kOf(effLoud));
       if (bubble) drawBubble(sprDial, bubble, 70, 176, 180, 160, 168);   // under the face
+      if (bubble && parentMsgLeft > 0) parentTag(sprDial);
       break;
     case V_SATURN:
       a.bg = rgb((uint8_t)skyR, (uint8_t)skyG, (uint8_t)skyB);
       drawSaturn(sprDial, mood, a, kOf(lvlSpl), kOf(effWarn), kOf(effLoud));
       if (bubble) drawBubble(sprDial, bubble, 8, 6, 170, 130, 46);       // above Saturn
+      if (bubble && parentMsgLeft > 0) parentTag(sprDial);
       break;
     case V_SOLAR:
       a.bg = rgb((uint8_t)skyR, (uint8_t)skyG, (uint8_t)skyB);
       drawSolar(sprDial, mood, a, kOf(lvlSpl), kOf(effWarn), kOf(effLoud));
       if (bubble) drawBubble(sprDial, bubble, 60, 10, 200, 40, 76);      // from the Sun
+      if (bubble && parentMsgLeft > 0) parentTag(sprDial);
       break;
     default:
       drawBuddy(sprBuddy, mood, a);
       if (bubble) drawBubble(sprBuddy, bubble, 6, 2, 152, BUDDY_W / 2 - 12, 36);   // above his head
+      if (bubble && parentMsgLeft > 0) parentTag(sprBuddy);
       drawPageDots(sprBuddy, 20, BUDDY_H - 8, 0, NVIEWS);
       sprBuddy.pushSprite(BUDDY_X, BUDDY_Y);
       drawMeter(effLoud, effWarn, effFloor);
@@ -535,6 +585,9 @@ void setup() {
     delay(3000);
   }
 
+  storageBegin();
+  webBegin();
+  Serial.printf("[boot] Voice Buddy %s from %s\n", FW_VERSION, esp_ota_get_running_partition()->label);
   csiModelLoad();
   if (netHasCreds()) netBegin();          // joins in the background; loop() starts CSI once connected
   if (!g.setupDone) wizardEnter(WIZ_FULL);
@@ -544,11 +597,111 @@ void setup() {
 // Keep CSI capture tied to the WiFi connection (the router can drop and come back)
 static void serviceNet() {
   static uint32_t last = 0;
+  static bool timeStarted = false;
   if (millis() - last < 1000) return;
   last = millis();
   bool conn = netConnected();
   if (conn && !csiRunning()) csiStart();
   else if (!conn && csiRunning()) csiStop();
+  if (conn && !timeStarted) { timeBegin(); timeStarted = true; }   // clock for history + schedule
+}
+
+// ---------------- new web sign-in notice ----------------
+static void drawNotice() {
+  char label[20] = "", ip[20] = "";
+  sscanf(noticeText, "%19[^|]|%19[^|]", label, ip);
+  tft.fillScreen(C_SCREEN);
+  tft.fillRect(0, 0, 320, 28, C_BTN);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(C_BTN_TX, C_BTN);
+  tft.drawString("New sign-in", 160, 14, 2);
+  tft.setTextColor(C_TEXT, C_SCREEN);
+  tft.drawString("A browser just signed in", 160, 70, 4);
+  char b[48];
+  snprintf(b, sizeof(b), "%s  -  %s", label, ip);
+  tft.setTextColor(C_DIM, C_SCREEN);
+  tft.drawString(b, 160, 100, 2);
+  tft.setTextColor(C_TEXT, C_SCREEN);
+  tft.drawString("Not you? Sign it out here, then", 160, 132, 2);
+  tft.drawString("change the parent PIN.", 160, 150, 2);
+  drawButton(10, 198, 140, 36, "Sign it out", C_OFF, C_BTN_TX);
+  drawButton(170, 198, 140, 36, "OK", C_ON, C_BTN_TX);
+}
+
+static void noticeTap(int x, int y) {
+  if (y < 190) return;
+  if (x < 160) {
+    const char *id = strrchr(noticeText, '|');
+    if (id) webRevokeById(id + 1);
+  }
+  enterChild();
+}
+
+// ---------------- commands from the parent page ----------------
+static void processWebCmds() {
+  static char msg[48];
+  WebCmd c;
+  while (webPollCmd(c)) {
+    switch (c.type) {
+      case WC_STAR:        earnStar(); break;
+      case WC_RESET_STARS: g.stars = 0; starProgress = 0; settingsSave(); break;
+      case WC_BUBBLE:
+        strncpy(msg, c.text, sizeof(msg) - 1);
+        say(msg, 5.f);
+        parentMsgLeft = 5.f;
+        break;
+      case WC_VIEW:
+        g.view = constrain(c.a, 0, NVIEWS - 1);
+        if (screen == SCR_CHILD) tft.fillRect(0, 30, 320, 210, C_SCREEN);
+        settingsSave();
+        break;
+      case WC_PAUSE:   paused = c.a != 0; break;
+      case WC_SETTINGS:
+        applyVad();
+        applyBrightness();
+        settingsSave();
+        if (c.a) timeBegin();          // time zone changed
+        if (screen == SCR_SETTINGS) settingsRedraw();
+        break;
+      case WC_RESTART: restartAt = millis() + 1500; break;
+      case WC_SIGNIN:
+        strncpy(noticeText, c.text, sizeof(noticeText) - 1);
+        noticePending = true;
+        break;
+    }
+  }
+  if (noticePending && screen == SCR_CHILD) { noticePending = false; screen = SCR_NOTICE; drawNotice(); }
+  if (restartAt && (int32_t)(millis() - restartAt) > 0) ESP.restart();
+}
+
+// once a second: history sample + morning star reset
+static void scheduleTick() {
+  static uint32_t last = 0;
+  static int lastResetYday = -1;
+  if (millis() - last < 1000) return;
+  last = millis();
+  if (screen == SCR_CHILD && !paused) histTick(lvlSpl);
+  if (!g.resetOn || !timeValid()) return;
+  time_t n = time(nullptr);
+  struct tm t;
+  localtime_r(&n, &t);
+  if (t.tm_hour * 60 + t.tm_min == g.resetMin && t.tm_yday != lastResetYday) {
+    lastResetYday = t.tm_yday;
+    g.stars = 0; starProgress = 0;
+    settingsSave();
+    Serial.println("[schedule] morning star reset");
+  }
+}
+
+// OTA rollback: a new firmware stays "pending" until it has run healthily for 30 s.
+// If it crashes or hangs before that, the bootloader returns to the previous one.
+extern "C" bool verifyRollbackLater() { return true; }
+static void confirmHealthy() {
+  static bool done = false;
+  if (done || millis() < 30000) return;
+  done = true;
+  if (audioCodecOk() && esp_ota_mark_app_valid_cancel_rollback() == ESP_OK)
+    Serial.printf("[ota] firmware %s marked good (%s)\n", FW_VERSION, esp_ota_get_running_partition()->label);
 }
 
 void loop() {
@@ -559,6 +712,10 @@ void loop() {
   static int downX = 0, downY = 0, lastX = 0, lastY = 0;
 
   if (screen != SCR_WIZARD) serviceNet();   // the wizard manages WiFi itself
+  webService();
+  processWebCmds();
+  scheduleTick();
+  confirmHealthy();
 
   int tx, ty;
   bool down = touchRead(tx, ty);
@@ -615,6 +772,11 @@ void loop() {
       lastFrame = now;
       break;
 
+    case SCR_NOTICE:
+      if (pressed) noticeTap(tx, ty);
+      lastFrame = now;
+      break;
+
     case SCR_WIZARD:
       if (pressed) wizardTap(tx, ty);
       if (screen == SCR_WIZARD) wizardTick();
@@ -653,6 +815,12 @@ void loop() {
       // W<mode>: open a setup screen (0 full, 1 voice, 2 zones, 3 wifi, 4 grown-up, 5 zone check)
       int m = Serial.read() - '0';
       if (m >= WIZ_FULL && m <= WIZ_CHECK) { demoMood = -1; wizardEnter((WizardMode)m); }
+    } else if (c == 'E') {
+      // E1 / E0: web control on/off from USB (physical access), for testing
+      int on = Serial.read() == '1';
+      g.webOn = on && certEnsure();
+      settingsSave();
+      Serial.printf("[web] web control %s\n", g.webOn ? "ON" : "OFF");
     } else if (c == 'T') {
       // T<tab>: open a settings tab (0 Voice, 1 Room, 2 Stars, 3 Screen, 4 Setup)
       int t = Serial.read() - '0';

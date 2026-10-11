@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Voice Buddy</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#eef1f5;--fg:#1d2330;--muted:#5d6677;--card:#fff;--line:#d9dee6;--accent:#2f6f8f;--accent-soft:#dcebf2;--good:#3f9e68;--good-soft:#dcf2e3;--warn:#c98a12;--warn-soft:#fbf0d4;--loud:#d4633f;--loud-soft:#fbe3da;--gold:#e8a813;--gold-soft:#fbefcc;--on-accent:#fff;
+--display:ui-rounded,"SF Pro Rounded","Segoe UI",system-ui,sans-serif;--body:ui-rounded,"SF Pro Rounded","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,"Cascadia Mono",Consolas,monospace}
+@media (prefers-color-scheme:dark){  :root{--bg:#12151b;--fg:#e6e9ef;--muted:#9ba4b5;--card:#1b1f27;--line:#2c323d;--accent:#7fb8d4;--accent-soft:#1d3340;--good:#6cc890;--good-soft:#17342a;--warn:#e7b44a;--warn-soft:#3a2f14;--loud:#f08a68;--loud-soft:#3d231c;--gold:#f2c04a;--gold-soft:#3a3014;--on-accent:#12151b;color-scheme:dark}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.5}
+[hidden]{display:none!important}
+h1,h2,h3{font-family:var(--display);line-height:1.15;margin:0}
+h1{font-size:24px}
+h3{font-size:16px;margin-bottom:6px}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.muted{color:var(--muted)}
+.small{font-size:12.5px}
+.msg{font-size:12.5px;min-height:1.5em;margin:8px 0 0;color:var(--muted)}
+.msg.ok{color:var(--good)}.msg.bad{color:var(--loud)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-width:0}
+.row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.row b{display:block;font-size:14px}
+.row>div>span{display:block;font-size:12px;color:var(--muted)}
+.ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+@media (max-width:600px){.row.stack{grid-template-columns:minmax(0,1fr)}.row.stack .ctl{justify-content:flex-start}}
+.switch{width:46px;height:28px;border-radius:999px;background:var(--line);position:relative;border:0;padding:0;cursor:pointer;flex:none}
+.switch::after{content:"";position:absolute;top:4px;left:4px;width:20px;height:20px;border-radius:50%;background:var(--card);transition:left .15s}
+.switch[aria-checked="true"]{background:var(--good)}
+.switch[aria-checked="true"]::after{left:22px}
+.switch:disabled{opacity:.45;cursor:not-allowed}
+.stepper{display:inline-flex;align-items:center;gap:6px;font-weight:700;font-variant-numeric:tabular-nums;font-size:14px}
+.stepper output{min-width:58px;text-align:center}
+.stepper button{width:34px;height:34px;border:1px solid var(--line);border-radius:9px;background:var(--card);cursor:pointer;font-size:18px;line-height:1}
+.btn{display:inline-block;font-weight:700;font-size:14px;border:1px solid var(--line);border-radius:9px;padding:8px 14px;background:var(--card);cursor:pointer;text-decoration:none;color:var(--fg)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn.danger{background:var(--loud);border-color:var(--loud);color:var(--on-accent)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.pill{display:inline-block;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:700}
+.input{border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:var(--bg);min-width:0}
+.meter{position:relative;height:18px;border-radius:999px;margin-top:8px}
+.meter .fill{position:absolute;inset:0 auto 0 0;border-radius:999px;transition:width .4s}
+.meter .mark{position:absolute;top:-4px;bottom:-4px;width:3px;background:var(--fg);border-radius:2px;transition:left .4s}
+.stats{display:flex;gap:20px;margin-top:10px}
+.stats b{display:block;font-family:var(--display);font-size:20px;line-height:1.1;font-variant-numeric:tabular-nums}
+.stats span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.face{width:76px;height:76px;border-radius:50%;display:grid;place-items:center;flex:none}
+.bar{height:10px;border-radius:999px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--gold);width:0;transition:width .4s}
+.bar.acc i{background:var(--accent)}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:10px;overflow-x:auto}
+.tabs button{padding:8px 12px;border:0;background:none;border-bottom:3px solid transparent;cursor:pointer;font-size:14px}
+.tabs button[aria-selected="true"]{border-bottom-color:var(--accent);color:var(--accent);font-weight:700}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;flex-wrap:wrap}
+.seg button{padding:7px 12px;font-size:13px;border:0;background:var(--card);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent);font-weight:700}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chips button{border:1px solid var(--line);border-radius:999px;padding:4px 11px;font-size:12.5px;background:var(--card);cursor:pointer}
+.mono{font-family:var(--mono);font-size:12px;overflow-wrap:anywhere}
+.chart svg{display:block;width:100%;height:auto}
+.confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;padding:10px;border-radius:10px;background:var(--loud-soft)}
+.tag{font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:1px 8px;margin-left:6px}
+/* login */
+.login{min-height:100vh;display:grid;place-items:center;padding:16px}
+.login .card{width:100%;max-width:320px;text-align:center;padding:20px}
+.dots{display:flex;gap:12px;justify-content:center;margin-top:12px}
+.dots i{width:14px;height:14px;border-radius:50%;border:2px solid var(--muted)}
+.dots i.on{background:var(--fg);border-color:var(--fg)}
+.pinpad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}
+.pinpad button{height:54px;border:1px solid var(--line);border-radius:10px;font-family:var(--display);font-size:22px;font-weight:700;background:var(--card);cursor:pointer}
+.pinpad button:active{background:var(--accent-soft)}
+/* app shell */
+.app{min-height:100vh}
+.nav{position:fixed;left:0;right:0;bottom:0;z-index:5;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+.nav .brand{display:none}
+.nav button{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:7px 2px 6px;border:0;background:none;font-size:11px;color:var(--muted);cursor:pointer}
+.nav svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.nav button[aria-current="page"]{color:var(--accent);font-weight:700}
+main{padding:14px 16px 96px;max-width:1100px;margin:0 auto}
+.top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+.live{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
+.live i{width:9px;height:9px;border-radius:50%;background:var(--muted)}
+.live.on i{background:var(--good)}.live.off{color:var(--loud)}.live.off i{background:var(--loud)}
+.grid{display:grid;gap:12px;align-content:start;grid-template-columns:minmax(0,1fr)}
+@media (min-width:900px){
+.app{display:grid;grid-template-columns:200px minmax(0,1fr)}
+.nav{position:sticky;top:0;height:100vh;flex-direction:column;border-top:0;border-right:1px solid var(--line);padding:16px 10px;gap:4px}
+.nav .brand{display:block;font-family:var(--display);font-size:19px;font-weight:700;margin:0 8px 12px}
+.nav button{flex:none;flex-direction:row;gap:10px;font-size:14px;padding:8px 10px;border-radius:8px;color:var(--fg)}
+.nav svg{width:18px;height:18px}
+.nav button[aria-current="page"]{background:var(--accent-soft)}
+main{padding:22px 24px 40px;width:100%}
+.two{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.hist2{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr)}
+}
+</style>
+</head>
+<body>
+<div id="login" class="login" hidden>
+<div class="card">
+<h1>Voice Buddy</h1>
+<p class="small muted" style="margin:4px 0 0">Enter the parent PIN</p>
+<div class="dots" id="dots" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+<p class="sr" id="pinsr" aria-live="polite" style="position:absolute;left:-9999px">0 of 4 digits</p>
+<div class="pinpad" id="pinpad"></div>
+<p class="msg bad" id="loginMsg" role="alert"></p>
+<p class="small muted" style="margin:6px 0 0">Stays signed in on this browser for 30 days</p>
+</div>
+</div>
+
+<div id="app" class="app" hidden>
+<nav class="nav" aria-label="Sections" id="nav"><span class="brand">Voice Buddy</span></nav>
+<main>
+<div class="top"><h1 id="ttl">Home</h1><span class="live" id="live" role="status"><i></i><span>Connecting…</span></span></div>
+
+<section id="s-home" class="grid two">
+<div class="grid">
+<div class="card" aria-labelledby="h-now">
+<h3 id="h-now">Right now</h3>
+<div style="display:flex;gap:12px;align-items:center">
+<div class="face" id="face"></div>
+<div style="min-width:0;flex:1">
+<span class="pill" id="mood">…</span>
+<div class="meter" id="meter" role="meter" aria-label="Voice level" aria-valuemin="30" aria-valuemax="100" aria-valuenow="30"><div class="fill" id="mfill"></div><div class="mark" id="mmark"></div></div>
+</div>
+</div>
+<div class="stats"><div><b id="vDb">–</b><span>Voice dB</span></div><div><b id="lDb">–</b><span>Line dB</span></div><div><b id="where">–</b><span>Where</span></div></div>
+</div>
+<div class="card">
+<h3>Today's stars</h3>
+<div style="font-family:var(--display);font-size:32px;font-weight:700;line-height:1.2"><span style="color:var(--gold)">★</span> <span id="nStars">–</span> <span style="font-size:18px" class="muted">/ <span id="nGoal">–</span></span></div>
+<div class="bar" style="margin-top:6px" aria-hidden="true"><i id="pBar"></i></div>
+<p class="small muted" id="nextStar" style="margin:4px 0 0">&nbsp;</p>
+<div style="display:flex;gap:8px;margin-top:8px"><button class="btn primary" id="giveStar">Give a star</button><button class="btn" id="resetStars">Reset</button></div>
+<div class="confirm" id="resetConfirm" hidden><span class="small" style="flex:1 1 140px">Set today's stars back to 0?</span><button class="btn danger" id="resetYes">Yes, reset</button><button class="btn" id="resetNo">Cancel</button></div>
+<p class="msg" id="starMsg" role="status"></p>
+</div>
+</div>
+<div class="card">
+<h3>Remote</h3>
+<div class="row" style="border:0;padding-bottom:4px"><div><b id="l-view">Buddy's screen</b><span>What the child sees</span></div></div>
+<div class="seg" id="viewSeg" role="group" aria-labelledby="l-view"></div>
+<div class="row" style="margin-top:6px"><div><b id="l-pause">Pause Buddy</b><span id="d-pause">Naps, stops counting</span></div><button class="switch" id="pauseSw" role="switch" aria-checked="false" aria-labelledby="l-pause" aria-describedby="d-pause"></button></div>
+<div style="padding-top:8px">
+<label for="bubble"><b style="font-size:14px">Send a bubble</b></label>
+<p class="small muted" style="margin:0 0 6px">Pops up on Buddy for a few seconds</p>
+<form id="bubbleForm" style="display:flex;gap:6px"><input class="input" id="bubble" maxlength="24" autocomplete="off" placeholder="Up to 24 letters" style="flex:1"><button class="btn primary" type="submit">Send</button></form>
+<div class="chips" id="chips"></div>
+</div>
+<p class="msg" id="remoteMsg" role="status"></p>
+</div>
+</section>
+
+<section id="s-history" class="grid" hidden>
+<div id="histBody" class="grid"></div>
+</section>
+
+<section id="s-settings" hidden>
+<div class="tabs" role="tablist" id="setTabs"></div>
+<div class="card" id="setPanels"><p class="muted">Loading settings…</p></div>
+<p class="msg savemsg" role="status"></p>
+</section>
+
+<section id="s-schedule" class="grid" hidden>
+<div class="card" id="schedCard"><p class="muted">Loading settings…</p></div>
+<p class="msg savemsg" role="status" style="margin:0"></p>
+</section>
+
+<section id="s-device" class="grid two" hidden>
+<div class="grid">
+<div class="card"><h3>About this Buddy</h3>
+<div class="row"><div><b>Firmware</b><span id="aFw">–</span></div></div>
+<div class="row"><div><b>Network</b><span id="aNet">–</span></div></div>
+<div class="row"><div><b>Certificate fingerprint</b><span class="mono" id="aFp">–</span></div></div>
+<div class="row"><div><b>Running for</b><span id="aUp">–</span></div></div>
+</div>
+<div class="card"><h3>Signed-in browsers</h3>
+<div id="sessList"><p class="small muted">Loading…</p></div>
+<div style="margin-top:8px"><button class="btn" id="revokeAll">Sign out all others</button></div>
+<p class="msg" id="sessMsg" role="status"></p>
+</div>
+</div>
+<div class="grid">
+<div class="card"><h3>Update firmware</h3>
+<p class="small muted" style="margin:0">Choose a voicebuddy-x.y.z.signed.bin from the GitHub releases. Only firmware signed by the owner is accepted. Buddy keeps the old version and switches back if the new one fails to start.</p>
+<div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap">
+<label class="btn" for="otaFile">Choose file</label><input type="file" id="otaFile" accept=".bin,application/octet-stream" style="position:absolute;left:-9999px">
+<span class="small" id="otaName">No file chosen</span>
+</div>
+<div class="bar acc" style="margin-top:10px" id="otaBarW" hidden><i id="otaBar"></i></div>
+<div style="margin-top:10px"><button class="btn primary" id="otaGo" disabled>Install update</button></div>
+<p class="msg" id="otaMsg" role="status"></p>
+</div>
+<div class="card"><h3>Settings and power</h3>
+<div class="row"><div><b>Back up settings</b><span>Save them to a file</span></div><a class="btn" id="backup" href="/api/backup" download="voicebuddy-settings.json">Back up</a></div>
+<div class="row"><div><b>Restore settings</b><span>From a backup file</span></div><label class="btn" for="restoreFile">Restore</label><input type="file" id="restoreFile" accept=".json,application/json" style="position:absolute;left:-9999px"></div>
+<div class="row"><div><b>Restart Buddy</b><span>Takes about 5 seconds</span></div><button class="btn" id="restart">Restart</button></div>
+<div class="confirm" id="restartConfirm" hidden><span class="small" style="flex:1 1 140px">Restart Buddy now?</span><button class="btn danger" id="restartYes">Yes, restart</button><button class="btn" id="restartNo">Cancel</button></div>
+<div class="row"><div><b>Sign out</b><span>On this browser</span></div><button class="btn" id="logout">Sign out</button></div>
+<p class="msg" id="devMsg" role="status"></p>
+</div>
+</div>
+</section>
+</main>
+</div>
+
+<script>
+(()=>{
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const DEMO=location.hash==='#demo';
+if(DEMO)installDemo();
+
+let S=null,ST=null,signedIn=false,section='home',fails=0,inflight=false,holdView=0,holdPause=0,lastMood='';
+
+class AuthErr extends Error{}
+const NA=e=>!(e instanceof AuthErr);
+async function api(path,body){
+const post=body!==undefined,o={method:post?'POST':'GET',headers:{},credentials:'same-origin',cache:'no-store'};
+if(post){o.headers['X-VB']='1';o.headers['Content-Type']='application/json';o.body=JSON.stringify(body)}
+const ac=new AbortController(),to=setTimeout(()=>ac.abort(),8000);o.signal=ac.signal;
+let r,j={};
+try{r=await fetch(path,o);try{j=await r.json()}catch(e){}}
+catch(e){const n=new Error('net');n.net=1;throw n}
+finally{clearTimeout(to)}
+if(r.status===401&&path!=='/api/login'){toLogin();throw new AuthErr('auth')}
+if(!r.ok){const e=new Error(j.error||'http'+r.status);e.status=r.status;e.data=j;throw e}
+return j;
+}
+async function act(p,b,el,ok,then){try{await api(p,b);say(el,ok,'ok');then&&then();return 1}catch(e){if(NA(e))say(el,e.net?NET:"Buddy didn't accept that. Try again.",'bad');return 0}}
+const NET="Can't reach Buddy. Check the WiFi and try again.";
+function say(el,t,cls){el=typeof el==='string'?$(el):el;if(!el)return;el.textContent=t||'';el.className=el.className.replace(/\b(ok|bad)\b/g,'').trim()+(cls?' '+cls:'')}
+
+function fmt12(t){if(!t||!/^\d{1,2}:\d{2}/.test(t))return t||'';let[h,m]=t.split(':').map(Number);const ap=h<12?'AM':'PM';h=h%12||12;return h+':'+String(m).padStart(2,'0')+' '+ap}
+function fmtDate(d){try{return new Date(d+'T12:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}catch(e){return d}}
+function fmtUp(s){s=Math.floor(s||0);const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return d?`${d} d ${h} h`:h?`${h} h ${m} min`:`${m} min`}
+const ZONE={NEAR:'Near',MID:'Middle',FAR:'Far',EMPTY:'Not in the room','--':'Not sure'};
+
+let pin='',busyLogin=false;
+const pad=$('#pinpad');
+pad.innerHTML=['1','2','3','4','5','6','7','8','9','del','0','ok'].map(k=>`<button type="button" data-p="${k}" aria-label="${k==='del'?'Delete':k==='ok'?'OK':k}">${k==='del'?'⌫':k==='ok'?'OK':k}</button>`).join('');
+function dots(){$$('#dots i').forEach((d,i)=>d.classList.toggle('on',i<pin.length));$('#pinsr').textContent=pin.length+' of 4 digits'}
+function pkey(k){if(busyLogin)return;if(k==='del')pin=pin.slice(0,-1);else if(k==='ok'){if(pin.length===4)doLogin()}else if(pin.length<4){pin+=k;if(pin.length===4)setTimeout(doLogin,120)}dots()}
+pad.addEventListener('click',e=>{const b=e.target.closest('button');if(b)pkey(b.dataset.p)});
+document.addEventListener('keydown',e=>{if($('#login').hidden)return;if(/^\d$/.test(e.key))pkey(e.key);else if(e.key==='Backspace')pkey('del');else if(e.key==='Enter')pkey('ok')});
+async function doLogin(){
+if(busyLogin||pin.length!==4)return;busyLogin=true;say('#loginMsg','');
+try{await api('/api/login',{pin});pin='';dots();enterApp()}
+catch(e){
+if(e.status===401){const n=e.data&&e.data.left;say('#loginMsg','Wrong PIN.'+(n!=null?` ${n} ${n===1?'try':'tries'} left`:''),'bad')}
+else if(e.status===429){const m=Math.max(1,Math.ceil(((e.data&&e.data.seconds)||60)/60));say('#loginMsg',`Too many tries. Try again in ${m} minute${m===1?'':'s'}`,'bad')}
+else say('#loginMsg',NET,'bad');
+pin='';dots();
+}
+busyLogin=false;
+}
+function toLogin(){signedIn=false;$('#app').hidden=true;$('#login').hidden=false;pin='';dots();const b=pad.querySelector('button');b&&b.focus()}
+function enterApp(){signedIn=true;$('#login').hidden=true;$('#app').hidden=false;say('#loginMsg','');renderStatus();loadSettings();tick();show(section)}
+
+const ICON={home:'<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',history:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',settings:'<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',schedule:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',device:'<rect x="6" y="3" width="12" height="18" rx="2"/><path d="M11 17h2"/>'};
+const SECS=[['home','Home'],['history','History'],['settings','Settings'],['schedule','Schedule'],['device','Device']];
+$('#nav').insertAdjacentHTML('beforeend',SECS.map(([k,n])=>`<button type="button" data-s="${k}"><svg viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg><span>${n}</span></button>`).join(''));
+$('#nav').addEventListener('click',e=>{const b=e.target.closest('button');if(b)show(b.dataset.s)});
+function show(s){
+section=s;SECS.forEach(([k,n])=>{$('#s-'+k).hidden=k!==s;const b=$(`#nav [data-s="${k}"]`);if(k===s){b.setAttribute('aria-current','page');$('#ttl').textContent=n}else b.removeAttribute('aria-current')});
+if(s==='history')loadHistory();
+if(s==='device')loadSessions();
+if((s==='settings'||s==='schedule')&&!S)loadSettings();
+window.scrollTo(0,0);
+}
+
+function live(st){const l=$('#live');l.className='live'+(st===1?' on':st===0?' off':'');l.lastChild.textContent=st===1?'Live':st===0?"Can't reach Buddy":'Connecting…'}
+async function tick(){
+if(!signedIn||document.visibilityState!=='visible'||inflight)return;inflight=true;
+try{ST=await api('/api/status');fails=0;live(1);renderStatus()}
+catch(e){if(NA(e)&&++fails>=2)live(0)}
+inflight=false;
+}
+setInterval(tick,1000);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')tick()});
+
+const INK='#3a2f26';
+function face(m){
+const E={arc:'<path d="M38 52q8-10 16 0M66 52q8-10 16 0"/>',dot:`<circle cx="46" cy="50" r="5" fill="${INK}"/><circle cx="74" cy="50" r="5" fill="${INK}"/>`,x:'<path d="M36 42l14 8-14 8M84 42l-14 8 14 8"/>',shut:'<path d="M38 52h16M66 52h16"/>'};
+const M={smile:'<path d="M46 72q14 14 28 0"/>',small:'<path d="M50 74q10 7 20 0"/>',flat:'<path d="M48 76h24"/>',wave:'<path d="M44 78q4-6 8 0t8 0t8 0t8 0" stroke-width="4"/>',o:'<circle cx="60" cy="78" r="5"/>',big:`<path d="M44 70q16 22 32 0z" fill="${INK}"/>`};
+const F={calm:['arc','small'],happy:['arc','smile'],alert:['dot','flat'],loud:['x','wave'],sleepy:['shut','o'],proud:['arc','big'],celebrate:['arc','big'],paused:['shut','flat']}[m]||['arc','small'];
+return `<svg viewBox="0 0 120 120" width="60" height="60" aria-hidden="true"><circle cx="60" cy="60" r="52" fill="#fff" stroke="${INK}" stroke-width="4"/><g stroke="${INK}" stroke-width="5" fill="none" stroke-linecap="round">${E[F[0]]}${M[F[1]]}</g></svg>`;
+}
+const MOOD={calm:['Calm','good'],happy:['Nice talking','good'],alert:['Getting loud','warn'],loud:['Too loud','loud'],sleepy:['Napping','accent'],proud:['Earned a star','gold'],celebrate:['Goal reached','gold'],paused:['Paused','muted']};
+const pct=v=>clamp((v-30)/70*100,0,100);
+const VIEWS=['Pup','Dial','Saturn','Planets'];
+$('#viewSeg').innerHTML=VIEWS.map((v,i)=>`<button type="button" data-v="${i}" aria-pressed="false">${v}</button>`).join('');
+function setView(v){$$('#viewSeg button').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.v===v)))}
+function renderStatus(){
+const s=ST;if(!s)return;
+const m=MOOD[s.mood]?s.mood:'calm',[lab,tone]=MOOD[m];
+if(m!==lastMood){lastMood=m;const f=$('#face');f.innerHTML=face(m);f.style.background=tone==='muted'?'var(--line)':`var(--${tone}-soft)`;const p=$('#mood');p.textContent=lab;p.style.background=tone==='muted'?'var(--line)':`var(--${tone}-soft)`;p.style.color=tone==='muted'?'var(--muted)':`var(--${tone})`}
+const line=+s.line||72,warn=s.warn!=null?+s.warn:line-6,lv=+s.level||0,w=pct(warn),l=pct(line);
+$('#meter').style.background=`linear-gradient(90deg,var(--good-soft) 0 ${w}%,var(--warn-soft) ${w}% ${l}%,var(--loud-soft) ${l}% 100%)`;
+const f=$('#mfill');f.style.width=pct(lv)+'%';f.style.background=lv>=line?'var(--loud)':lv>=warn?'var(--warn)':'var(--good)';
+$('#mmark').style.left=`calc(${l}% - 1.5px)`;$('#meter').setAttribute('aria-valuenow',Math.round(lv));$('#meter').setAttribute('aria-valuetext',`${Math.round(lv)} dB, line ${line} dB`);
+$('#vDb').textContent=Math.round(lv);$('#lDb').textContent=line;$('#where').textContent=s.zone||'--';
+$('#nStars').textContent=s.stars;$('#nGoal').textContent=s.goal;$('#pBar').style.width=clamp((s.prog||0)*100,0,100)+'%';
+$('#nextStar').textContent=s.paused?'Paused, not counting':s.stars>=s.goal?'Goal reached today. Stars keep coming.':s.starEvery?`Next star after about ${Math.max(1,Math.ceil((1-(s.prog||0))*s.starEvery))} s of nice talking`:'';
+if(Date.now()>holdView)setView(+s.view||0);
+if(Date.now()>holdPause)$('#pauseSw').setAttribute('aria-checked',String(!!s.paused));
+const z=$('#zoneNow');if(z)z.textContent=(ZONE[s.zone]||s.zone||'Not sure')+(s.zoneConf&&s.zone!=='--'?` · ${s.zoneConf}% sure`:'');
+$('#aFw').textContent=s.fw||'–';$('#aNet').textContent=[s.ssid,s.ip].filter(Boolean).join(' · ')||'–';$('#aFp').textContent=s.fingerprint||'–';$('#aUp').textContent=fmtUp(s.uptime);
+const tn=$('#timeNote');if(tn)tn.textContent=s.timeValid&&s.time?`Buddy's time now: ${fmt12(s.time)}`:'Waiting for the time from the internet';
+}
+$('#viewSeg').addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;const v=+b.dataset.v;holdView=Date.now()+4000;setView(v);if(!await act('/api/view',{view:v},'#remoteMsg',`Buddy shows ${VIEWS[v]}`))holdView=0});
+$('#pauseSw').addEventListener('click',async e=>{const sw=e.currentTarget,v=sw.getAttribute('aria-checked')!=='true';holdPause=Date.now()+4000;sw.setAttribute('aria-checked',v);if(!await act('/api/pause',{paused:v},'#remoteMsg',v?'Buddy is paused':'Buddy is back on')){holdPause=0;sw.setAttribute('aria-checked',!v)}});
+async function sendBubble(t){t=(t||'').trim().slice(0,24);if(!t){say('#remoteMsg','Type a short message first','bad');return}
+say('#remoteMsg','Sending…');if(await act('/api/bubble',{text:t},'#remoteMsg',`Sent “${t}”`))$('#bubble').value=''}
+$('#bubbleForm').addEventListener('submit',e=>{e.preventDefault();sendBubble($('#bubble').value)});
+$('#chips').innerHTML=['Great job!','Inside voice, please',"I'm proud of you",'Snack time!'].map(c=>`<button type="button">${esc(c)}</button>`).join('');
+$('#chips').addEventListener('click',e=>{const b=e.target.closest('button');if(b)sendBubble(b.textContent)});
+$('#giveStar').addEventListener('click',async e=>{const b=e.currentTarget;b.disabled=true;await act('/api/star',{},'#starMsg','Star given',tick);b.disabled=false});
+$('#resetStars').addEventListener('click',()=>{$('#resetConfirm').hidden=false;$('#resetYes').focus()});
+$('#resetNo').addEventListener('click',()=>{$('#resetConfirm').hidden=true;$('#resetStars').focus()});
+$('#resetYes').addEventListener('click',()=>{$('#resetConfirm').hidden=true;act('/api/stars/reset',{},'#starMsg',"Today's stars are back to 0",tick)});
+
+const DEF={
+loudDb:{l:'Too-loud line',s:'Where Buddy covers his ears',min:40,max:100,st:1,u:' dB'},
+warnMargin:{l:'Early warning',s:'Yellow starts this much sooner',min:2,max:15,st:1,u:' dB'},
+hisVoiceOnly:{l:'Listen only for his/her voice',sw:1,s:()=>S.pitchHi?`Ignores grown-ups (${S.pitchLo}–${S.pitchHi} Hz)`:'Run his/her voice setup on Buddy first',dis:()=>!S.pitchHi},
+speechOnly:{l:'Ignore bangs and noise',s:'Only voices move the meter',sw:1},
+bubbles:{l:'Talk bubbles',s:'Buddy says short phrases',sw:1},
+distOn:{l:'Adjust for distance',sw:1,s:()=>S.zonesReady?'Lower the line when he/she is far':'Set up room zones on Buddy first'},
+farOffset:{l:'Far-away adjustment',s:'How much the line drops when he/she is far',min:-20,max:0,st:1,u:' dB'},
+lombard:{l:'Louder room, higher line',s:'Allow a bit more over the TV',sw:1},
+starEvery:{l:'Star every',s:'His/her voice time per star',min:15,max:300,st:5,u:' s'},
+dailyGoal:{l:'Daily goal',s:'Stars to reach each day',min:3,max:30,st:1,u:''},
+loudResets:{l:'Loud empties the star bar',s:'Otherwise it only pauses',sw:1},
+chime:{l:'Chime',s:'A soft sound when a star is earned',sw:1},
+brightness:{l:'Brightness',s:"Buddy's screen",min:10,max:100,st:10,u:' %'},
+ledGlow:{l:'Back light glow',s:'Colored light behind Buddy',sw:1},
+napMin:{l:'Nap after quiet',s:'Screen rests when the room is quiet',min:1,max:15,st:1,u:' min'},
+calOffset:{l:'Match a phone dB meter',s:'Change until Buddy and the phone agree',min:60,max:140,st:1,u:''},
+resetOn:{l:'Reset stars each morning',s:'Stars go back to 0 at this time',sw:1},
+quietOn:{l:'Quiet hours',s:'A lower line at bedtime',sw:1},
+quietLine:{l:'Quiet line',s:'Too-loud line during quiet hours',min:40,max:100,st:1,u:' dB'}
+};
+const TABS={Voice:['loudDb','warnMargin','hisVoiceOnly','speechOnly','bubbles'],Room:['distOn','farOffset','lombard','ZONE'],Stars:['starEvery','dailyGoal','loudResets','chime'],Screen:['brightness','ledGlow','napMin','calOffset']};
+const TZ=[['Eastern','EST5EDT,M3.2.0,M11.1.0'],['Central','CST6CDT,M3.2.0,M11.1.0'],['Mountain','MST7MDT,M3.2.0,M11.1.0'],['Arizona','MST7'],['Pacific','PST8PDT,M3.2.0,M11.1.0'],['Alaska','AKST9AKDT,M3.2.0,M11.1.0'],['Hawaii','HST10'],['UK','GMT0BST,M3.5.0/1,M10.5.0'],['Central Europe','CET-1CEST,M3.5.0,M10.5.0/3'],['UTC','UTC0']];
+function ctl(k){const d=DEF[k];return d.sw?`<button type="button" class="switch" role="switch" aria-checked="false" data-k="${k}" aria-labelledby="l-${k}" aria-describedby="d-${k}"></button>`
+:`<div class="stepper" data-k="${k}"><button type="button" data-d="-1" aria-label="Lower: ${d.l}">−</button><output id="o-${k}" aria-live="polite">–</output><button type="button" data-d="1" aria-label="Raise: ${d.l}">+</button></div>`}
+function row(k,extra){const d=DEF[k];return `<div class="row"><div><b id="l-${k}">${esc(d.l)}</b><span id="d-${k}">${typeof d.s==='string'?esc(d.s):''}</span></div>${extra!=null?extra:ctl(k)}</div>`}
+let tab='Voice';
+function buildSettings(){
+$('#setTabs').innerHTML=Object.keys(TABS).map(t=>`<button type="button" role="tab" id="t-${t}" aria-controls="p-${t}" aria-selected="${t===tab}" tabindex="${t===tab?0:-1}">${t}</button>`).join('');
+$('#setPanels').innerHTML=Object.entries(TABS).map(([t,ks])=>`<div role="tabpanel" id="p-${t}" aria-labelledby="t-${t}" ${t===tab?'':'hidden'}>${ks.map(k=>k==='ZONE'?`<div class="row"><div><b>Where is he/she?</b><span>Live, from Buddy's room zones</span></div><span id="zoneNow" style="font-weight:700;font-size:14px">–</span></div>`:row(k)).join('')}</div>`).join('');
+const ti=(k,lab)=>`<input type="time" class="input" data-k="${k}" aria-label="${lab}">`;
+$('#schedCard').innerHTML=`<h3>Morning and bedtime</h3>${row('resetOn')}<div class="row"><div><b>Reset time</b><span>Time comes from the internet</span></div>${ti('resetTime','Morning reset time')}</div>${row('quietOn')}
+<div class="row stack"><div><b>From / to</b><span>Quiet hours can cross midnight</span></div><div class="ctl">${ti('quietFrom','Quiet hours start')}<span class="muted">to</span>${ti('quietTo','Quiet hours end')}</div></div>${row('quietLine')}
+<div class="row"><div><label for="tz"><b>Time zone</b></label><span id="timeNote">Waiting for the time from the internet</span></div><select class="input" id="tz" data-k="tz">${TZ.map(([n,v])=>`<option value="${esc(v)}">${n}</option>`).join('')}</select></div>`;
+renderStatus();
+}
+$('#setTabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b)selTab(b.id.slice(2))});
+$('#setTabs').addEventListener('keydown',e=>{const ks=Object.keys(TABS),i=ks.indexOf(tab);if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();selTab(ks[(i+(e.key==='ArrowRight'?1:ks.length-1))%ks.length]);$('#t-'+tab).focus()}});
+function selTab(t){tab=t;$$('#setTabs button').forEach(b=>{const on=b.id==='t-'+t;b.setAttribute('aria-selected',on);b.tabIndex=on?0:-1});$$('#setPanels [role=tabpanel]').forEach(p=>p.hidden=p.id!=='p-'+t)}
+const fmtV=(k,v)=>(k==='farOffset'&&v<0?'−'+Math.abs(v):v)+(DEF[k].u||'');
+function refresh(){
+if(!S)return;
+for(const k in DEF){const d=DEF[k];if(S[k]==null)continue;
+if(typeof d.s==='function'){const e=$('#d-'+k);if(e)e.textContent=d.s()}
+if(d.sw)$$(`.switch[data-k="${k}"]`).forEach(b=>{b.setAttribute('aria-checked',String(!!S[k]));b.disabled=d.dis?d.dis():false});
+else{const o=$('#o-'+k);if(o)o.textContent=fmtV(k,S[k])}}
+$$('input[type=time][data-k],select[data-k]').forEach(i=>{if(document.activeElement!==i&&S[i.dataset.k]!=null)i.value=S[i.dataset.k]});
+}
+async function loadSettings(){
+try{S=await api('/api/settings');buildSettings();refresh()}
+catch(e){if(e instanceof AuthErr)return;const h=`<p class="msg bad">Couldn't load settings. ${NET}</p><button class="btn retrySet">Try again</button>`;if(!S){$('#setPanels').innerHTML=h;$('#schedCard').innerHTML=h}}
+}
+document.addEventListener('click',e=>{if(e.target.closest('.retrySet'))loadSettings()});
+let pend={},saveT=null;
+function saveMsg(t,c){$$('.savemsg').forEach(m=>say(m,t,c))}
+function setK(k,v,delay){S[k]=v;pend[k]=v;refresh();saveMsg('Saving…');clearTimeout(saveT);saveT=setTimeout(flush,delay)}
+async function flush(){
+const body=pend;pend={};if(!Object.keys(body).length)return;
+try{const r=await api('/api/settings',body);if(r.settings)S=Object.assign({},r.settings,pend);saveMsg('Saved to Buddy','ok');refresh();tick()}
+catch(e){if(e instanceof AuthErr)return;saveMsg(e.net?"Couldn't save. "+NET:"Buddy didn't accept that change.",'bad');loadSettings()}
+}
+function onSetClick(e){
+const sw=e.target.closest('.switch[data-k]');if(sw&&!sw.disabled){setK(sw.dataset.k,!S[sw.dataset.k],0);return}
+const b=e.target.closest('.stepper button');if(!b)return;const k=b.parentNode.dataset.k,d=DEF[k];
+const v=clamp((+S[k]||0)+(+b.dataset.d)*d.st,d.min,d.max);if(v!==S[k])setK(k,v,400);
+}
+function onSetChange(e){const i=e.target.closest('[data-k]');if(!i||!S)return;if(i.type==='time'&&!/^\d{2}:\d{2}$/.test(i.value))return;setK(i.dataset.k,i.value,0)}
+['#setPanels','#schedCard'].forEach(s=>{$(s).addEventListener('click',onSetClick);$(s).addEventListener('change',onSetChange)});
+
+let histBusy=false;
+async function loadHistory(){
+if(histBusy)return;histBusy=true;const hb=$('#histBody');
+if(!hb.firstChild)hb.innerHTML='<div class="card"><p class="muted" style="margin:0">Loading history…</p></div>';
+try{renderHistory(await api('/api/history'))}
+catch(e){if(NA(e))hb.innerHTML=`<div class="card"><p class="msg bad" style="margin:0">Couldn't load history. ${NET}</p><button class="btn" id="histRetry" style="margin-top:8px">Try again</button></div>`}
+histBusy=false;
+}
+document.addEventListener('click',e=>{if(e.target.id==='histRetry'||e.target.id==='histRefresh')loadHistory()});
+const star=(cx,cy)=>`<path d="M${cx} ${cy-7}l2 5h5l-4 3 2 5-5-3-5 3 2-5-4-3h5z" fill="var(--gold)"/>`;
+function dayChart(t,line){
+const sl=t.slots||[],W=640,H=220,L=34,R=12,T=16,B=26;
+let mx=0;sl.forEach(s=>{if(s)mx=Math.max(mx,s[1]||s[0])});
+const lo=30,hi=clamp(Math.ceil((Math.max(mx,line)+6)/10)*10,80,120);
+const x=i=>L+(W-L-R)*i/144,y=v=>T+(H-T-B)*(1-(clamp(v,lo,hi)-lo)/(hi-lo));
+let o=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Voice level today with the too-loud line at ${line} dB">`;
+for(let v=40;v<=hi;v+=10)o+=`<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L-6}" y="${y(v)+4}" font-size="11" text-anchor="end" fill="var(--muted)">${v}</text>`;
+for(let h=0;h<=24;h+=3)o+=`<text x="${x(h*6)}" y="${H-8}" font-size="11" text-anchor="${h===0?'start':h===24?'end':'middle'}" fill="var(--muted)">${h%12||12}${h<12||h===24?'a':'p'}</text>`;
+let run=[];const flushRun=()=>{if(!run.length)return;const pts=run.map(([i,v])=>`${x(i+.5).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+if(run.length===1)o+=`<circle cx="${x(run[0][0]+.5)}" cy="${y(run[0][1])}" r="2.5" fill="var(--accent)"/>`;
+else o+=`<polygon points="${x(run[0][0]+.5)},${y(lo)} ${pts} ${x(run[run.length-1][0]+.5)},${y(lo)}" fill="var(--accent-soft)"/><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>`;run=[]};
+for(let i=0;i<144;i++){const s=sl[i];if(s&&s[0]!=null)run.push([i,s[0]]);else flushRun()}flushRun();
+o+=`<line x1="${L}" x2="${W-R}" y1="${y(line)}" y2="${y(line)}" stroke="var(--loud)" stroke-width="2" stroke-dasharray="6 4"/><text x="${W-R}" y="${y(line)-6}" font-size="11" text-anchor="end" fill="var(--loud)">too-loud line ${line} dB</text>`;
+sl.forEach((s,i)=>{if(s&&s[1]>line)o+=`<circle cx="${x(i+.5)}" cy="${y(s[1])}" r="4.5" fill="var(--loud)"/>`});
+(t.events||[]).forEach(ev=>{if(ev.type!=='star'||!ev.t)return;const[h,m]=ev.t.split(':').map(Number),i=Math.floor((h*60+m)/10),s=sl[i];o+=star(x(i+.5),y(s&&s[0]!=null?s[0]:line-12)-14)});
+return o+'</svg>';
+}
+function weekChart(wk,goal){
+const W=360,H=190,L=26,R=8,T=16,B=24,max=Math.max(goal+2,...wk.map(d=>d.stars||0)),n=wk.length||7,bw=(W-L-R)/n,y=v=>T+(H-T-B)*(1-v/max);
+const step=max>16?8:4;let o=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Stars per day this week against a goal of ${goal}">`;
+for(let v=0;v<=max;v+=step)o+=`<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L-5}" y="${y(v)+4}" font-size="10" text-anchor="end" fill="var(--muted)">${v}</text>`;
+wk.forEach((d,i)=>{const s=d.stars||0,bx=L+i*bw+bw*.18,cx=bx+bw*.32;
+o+=`<rect x="${bx}" y="${y(s)}" width="${bw*.64}" height="${Math.max(0,y(0)-y(s))}" rx="4" fill="${s>=goal?'var(--gold)':'var(--accent)'}" opacity="${i===n-1?.55:1}"><title>${esc(d.day)}: ${s} stars</title></rect><text x="${cx}" y="${y(s)-4}" font-size="10" text-anchor="middle" fill="var(--fg)">${s}</text><text x="${cx}" y="${H-7}" font-size="10" text-anchor="middle" fill="var(--muted)">${esc(i===n-1?'Today':d.day)}</text>`});
+return o+`<line x1="${L}" x2="${W-R}" y1="${y(goal)}" y2="${y(goal)}" stroke="var(--gold)" stroke-width="2" stroke-dasharray="5 4"/><text x="${W-R}" y="${y(goal)-5}" font-size="10" text-anchor="end" fill="var(--gold)">goal ${goal}</text></svg>`;
+}
+function renderHistory(h){
+const hb=$('#histBody');
+if(!h||h.timeValid===false){hb.innerHTML='<div class="card"><h3>Today</h3><p class="muted" style="margin:0">History needs the time from the internet. Buddy will start recording once it\'s connected.</p></div>';return}
+const t=h.today||{},ev=t.events||[],loud=ev.filter(e=>e.type==='loud'),stars=ev.filter(e=>e.type==='star').length;
+const line=(S&&S.loudDb)||(ST&&ST.line)||72,goal=(S&&S.dailyGoal)||(ST&&ST.goal)||10,has=(t.slots||[]).some(s=>s&&s[0]!=null);
+hb.innerHTML=`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline;flex-wrap:wrap"><h3>Today <span class="muted" style="font-weight:400;font-size:13px">· ${loud.length} loud moment${loud.length===1?'':'s'} · ${stars} star${stars===1?'':'s'}</span></h3><button class="btn" id="histRefresh" style="padding:4px 10px;font-size:12.5px">Refresh</button></div>
+${has?`<div class="chart">${dayChart(t,line)}</div><p class="small muted" style="margin:4px 0 0">Blue: voice level · red dots: over the line · gold stars: star earned</p>`:'<p class="muted" style="margin:0">Nothing recorded yet today.</p>'}</div>
+<div class="grid hist2"><div class="card"><h3>This week</h3><div class="chart">${(h.week||[]).length?weekChart(h.week,goal):'<p class="muted">No days yet.</p>'}</div></div>
+<div class="card"><h3>Loud moments today</h3>${loud.length?loud.slice().reverse().map(e=>`<div class="row"><div><b>${esc(fmt12(e.t))}</b><span>${e.dur!=null?esc(e.dur)+' s':''}</span></div><span class="pill" style="background:var(--loud-soft);color:var(--loud)">${esc(e.db)} dB</span></div>`).join(''):'<p class="muted" style="margin:0">No loud moments yet today.</p>'}</div></div>`;
+}
+
+async function loadSessions(){
+const el=$('#sessList');
+try{const r=await api('/api/sessions'),ss=r.sessions||[];
+el.innerHTML=ss.length?ss.map(s=>`<div class="row"><div><b>${esc(s.label||'Browser')}${s.current?'<span class="tag">This browser</span>':''}</b><span>Signed in ${esc(fmtDate(s.created))}</span></div><button class="btn" data-sid="${esc(s.id)}" data-cur="${s.current?1:''}">Sign out</button></div>`).join(''):'<p class="small muted">No browsers signed in.</p>';
+$('#revokeAll').disabled=!ss.some(s=>!s.current)}
+catch(e){if(NA(e))el.innerHTML=`<p class="msg bad">Couldn't load the list. ${NET}</p>`}
+}
+$('#sessList').addEventListener('click',async e=>{const b=e.target.closest('button[data-sid]');if(!b)return;if(b.dataset.cur)return logout();b.disabled=true;if(!await act('/api/sessions/revoke',{id:b.dataset.sid},'#sessMsg','Signed out',loadSessions))b.disabled=false});
+$('#revokeAll').addEventListener('click',()=>act('/api/sessions/revoke',{all:true},'#sessMsg','All other browsers are signed out',loadSessions));
+async function logout(){try{await api('/api/logout',{})}catch(e){}toLogin()}
+$('#logout').addEventListener('click',logout);
+
+let waiting=false;
+function waitBack(msgEl,doneText){
+if(waiting)return;waiting=true;let n=0;const start=Date.now();
+const go=async()=>{
+if(++n>90){waiting=false;say(msgEl,"Buddy hasn't answered yet. Check its screen, then reload this page.",'bad');return}
+try{const ac=new AbortController(),to=setTimeout(()=>ac.abort(),4000);const r=await fetch('/api/status',{cache:'no-store',credentials:'same-origin',signal:ac.signal});clearTimeout(to);
+if(Date.now()-start>2500&&(r.ok||r.status===401)){waiting=false;let j={};try{j=await r.json()}catch(e){}
+if(r.status===401){say(msgEl,'Buddy is back. Sign in again.','ok');toLogin();return}ST=j;renderStatus();live(1);say(msgEl,doneText(j),'ok');return}}catch(e){}
+setTimeout(go,2000)};
+setTimeout(go,3000);
+}
+const OTAERR={bad_signature:"This file isn't signed by the owner, so Buddy refused it.",too_big:'File is too large.',write_failed:'Writing failed. Nothing was changed.'};
+let otaF=null;
+$('#otaFile').addEventListener('change',e=>{const f=e.target.files[0];otaF=null;$('#otaGo').disabled=true;say('#otaMsg','');if(!f)return;
+$('#otaName').textContent=`${f.name} (${(f.size/1048576).toFixed(2)} MB)`;
+if(!/\.bin$/i.test(f.name)){say('#otaMsg','Choose a .bin firmware file.','bad');return}otaF=f;$('#otaGo').disabled=false});
+$('#otaGo').addEventListener('click',()=>{
+if(!otaF)return;const f=otaF,go=$('#otaGo'),bar=$('#otaBar');go.disabled=true;$('#otaBarW').hidden=false;bar.style.width='0';say('#otaMsg','Uploading… 0%');
+const x=new XMLHttpRequest();x.open('POST','/api/ota');x.setRequestHeader('Content-Type','application/octet-stream');x.setRequestHeader('X-VB','1');x.timeout=300000;
+x.upload.onprogress=e=>{if(e.lengthComputable){const p=Math.round(e.loaded/e.total*100);bar.style.width=p+'%';say('#otaMsg',p<100?`Uploading… ${p}%`:'Checking the signature…')}};
+x.onload=()=>{let j={};try{j=JSON.parse(x.responseText)}catch(e){}
+if(x.status===200&&j.ok!==false){bar.style.width='100%';say('#otaMsg','Installed. Buddy is restarting…','ok');otaF=null;$('#otaFile').value='';$('#otaName').textContent='No file chosen';waitBack('#otaMsg',s=>`Buddy is back on version ${s.fw||'?'}.`);return}
+if(x.status===401){toLogin();return}
+say('#otaMsg',x.status===400?(OTAERR[j.error]||`Buddy refused the file (${j.error||'unknown'}). Nothing was changed.`):`Update failed (error ${x.status}). Nothing was changed.`,'bad');go.disabled=false;$('#otaBarW').hidden=true};
+x.onerror=x.ontimeout=()=>{say('#otaMsg','The upload stopped. Check the WiFi. Buddy keeps the old version.','bad');go.disabled=false;$('#otaBarW').hidden=true};
+x.send(f);
+});
+$('#backup').addEventListener('click',e=>{if(!DEMO)return;e.preventDefault();const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S||{},null,2)],{type:'application/json'}));a.download='voicebuddy-settings.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)});
+$('#restoreFile').addEventListener('change',async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;let obj;
+try{obj=JSON.parse(await f.text());if(!obj||typeof obj!=='object'||Array.isArray(obj))throw 0}catch(er){say('#devMsg',"That file isn't a Voice Buddy backup.",'bad');return}
+say('#devMsg','Restoring…');try{await api('/api/restore',obj);say('#devMsg','Settings restored','ok');S=null;loadSettings()}catch(er){if(NA(er))say('#devMsg',er.net?NET:"Buddy didn't accept that backup.",'bad')}});
+$('#restart').addEventListener('click',()=>{$('#restartConfirm').hidden=false;$('#restartYes').focus()});
+$('#restartNo').addEventListener('click',()=>{$('#restartConfirm').hidden=true;$('#restart').focus()});
+$('#restartYes').addEventListener('click',async()=>{$('#restartConfirm').hidden=true;if(await act('/api/restart',{},'#devMsg','Restarting… back in a few seconds'))waitBack('#devMsg',()=>'Buddy is back')});
+
+(async()=>{
+try{ST=await api('/api/status');enterApp()}
+catch(e){if(e instanceof AuthErr)return;signedIn=true;$('#app').hidden=false;live(0);loadSettings();show('home')}
+})();
+
+function installDemo(){
+const now=()=>new Date(),p2=n=>String(n).padStart(2,'0'),hm=d=>p2(d.getHours())+':'+p2(d.getMinutes());
+const D={authed:false,left:5,lockUntil:0,down:0,fw:'1.4.0',stars:4,prog:.3,lv:52,tgt:52,tgtAt:0,zone:'MID',zAt:0,starAt:0,view:0,paused:false,t0:Date.now(),last:Date.now(),
+set:{loudDb:72,warnMargin:6,hisVoiceOnly:true,speechOnly:true,bubbles:true,distOn:true,farOffset:-6,lombard:true,starEvery:45,dailyGoal:10,loudResets:false,chime:false,brightness:80,ledGlow:true,napMin:2,calOffset:110,resetOn:true,resetTime:'07:00',quietOn:false,quietFrom:'19:30',quietTo:'07:00',quietLine:64,tz:'EST5EDT,M3.2.0,M11.1.0',pitchLo:230,pitchHi:700,setupDone:true,zonesReady:true},
+sess:[{id:'ab12cd',label:'iPhone',created:'',current:true},{id:'ef34gh',label:'Kitchen laptop',created:'2026-10-02',current:false},{id:'ij56kl',label:'iPad',created:'2026-09-20',current:false}]};
+const iso=d=>d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());D.sess[0].created=iso(now());
+function status(){
+const t=Date.now(),dt=(t-D.last)/1000,s=D.set,line=s.loudDb,warn=line-s.warnMargin;D.last=t;
+if(t>D.tgtAt){D.tgt=Math.random()<.15?line+4+Math.random()*10:40+Math.random()*(warn-42);D.tgtAt=t+2000+Math.random()*4000}
+D.lv=clamp(D.lv+(D.tgt-D.lv)*.35+(Math.random()-.5)*4,32,98);
+if(t>D.zAt){D.zone=['NEAR','MID','FAR','MID','NEAR'][Math.floor(Math.random()*5)];D.zAt=t+8000+Math.random()*8000}
+if(!D.paused){if(D.lv>=line){if(s.loudResets)D.prog=0}else if(D.lv>=38){D.prog+=dt/s.starEvery;if(D.prog>=1){D.prog=0;D.stars++;D.starAt=t}}}
+const mood=D.paused?'paused':D.lv>=line?'loud':D.lv>=warn?'alert':t-D.starAt<3000?'proud':D.stars>=s.dailyGoal?'celebrate':D.lv<40?'sleepy':D.lv<48?'calm':'happy';
+return{level:Math.round(D.lv),line,warn,mood,zone:D.zone,zoneConf:70+Math.floor(Math.random()*25),pps:128,stars:D.stars,goal:s.dailyGoal,prog:D.prog,starEvery:s.starEvery,view:D.view,paused:D.paused,time:hm(now()),timeValid:true,fw:D.fw,ssid:'HomeNet',ip:'192.168.1.42',fingerprint:'3F:A2:91:0C:7E:55:D4:18:B2:6A:C9:03:EE:47:12:9C',uptime:3600+Math.floor((t-D.t0)/1000)};
+}
+function history(){
+const n=now(),cur=Math.floor((n.getHours()*60+n.getMinutes())/10),st=Math.min(42,Math.max(0,cur-30)),line=D.set.loudDb,slots=Array(144).fill(null),events=[];let v=50,lastStar=st;
+for(let i=st;i<=cur;i++){if(i>=72&&i<78)continue;v+=(Math.sin(i*1.7)+Math.cos(i*.6))*3;if(i%17===9)v+=14;v=clamp(v,36,80);const a=Math.round(v),mx=Math.round(a+4+Math.abs(Math.sin(i*3.1))*8);slots[i]=[a,mx];
+const tt=p2(Math.floor(i*10/60))+':'+p2(i*10%60+3);
+if(mx>line)events.push({t:tt,type:'loud',db:mx,dur:2+Math.round(Math.abs(Math.cos(i))*8)});else if(i-lastStar>=6){events.push({t:tt,type:'star'});lastStar=i}
+if(v>66)v-=12}
+const week=[];for(let k=6;k>=0;k--){const d=new Date(n);d.setDate(d.getDate()-k);week.push({date:iso(d),day:d.toLocaleDateString('en-US',{weekday:'short'}),stars:k?[9,6,11,8,10,5][k-1]:D.stars})}
+return{timeValid:true,today:{date:iso(n),slots,events},week};
+}
+function handle(p,post,b){
+if(Date.now()<D.down)return null;
+if(p==='/api/login'){if(Date.now()<D.lockUntil)return[429,{error:'locked',seconds:Math.ceil((D.lockUntil-Date.now())/1000)}];
+if(b&&b.pin==='1234'){D.authed=true;D.left=5;return[200,{ok:true}]}if(--D.left<=0){D.left=5;D.lockUntil=Date.now()+300000;return[429,{error:'locked',seconds:300}]}return[401,{error:'wrong_pin',left:D.left}]}
+if(!D.authed)return[401,{error:'auth'}];
+switch(p){
+case '/api/logout':D.authed=false;return[200,{ok:true}];
+case '/api/status':return[200,status()];
+case '/api/settings':if(post)Object.assign(D.set,b);return[200,post?{ok:true,settings:{...D.set}}:{...D.set}];
+case '/api/star':D.stars++;D.starAt=Date.now();return[200,{ok:true}];
+case '/api/stars/reset':D.stars=0;D.prog=0;return[200,{ok:true}];
+case '/api/bubble':case '/api/backup':return[200,p==='/api/backup'?D.set:{ok:true}];
+case '/api/view':D.view=b.view;return[200,{ok:true}];
+case '/api/pause':D.paused=!!b.paused;return[200,{ok:true}];
+case '/api/history':return[200,history()];
+case '/api/sessions':return[200,{sessions:D.sess}];
+case '/api/sessions/revoke':D.sess=b.all?D.sess.filter(s=>s.current):D.sess.filter(s=>s.id!==b.id);return[200,{ok:true}];
+case '/api/restore':Object.assign(D.set,b);return[200,{ok:true}];
+case '/api/restart':D.down=Date.now()+5000;return[200,{ok:true}];
+}
+return[404,{error:'not_found'}];
+}
+window.fetch=async(u,o={})=>{await new Promise(r=>setTimeout(r,60+Math.random()*120));let b;try{b=o.body?JSON.parse(o.body):undefined}catch(e){}
+const r=handle(new URL(u,location.href).pathname,(o.method||'GET')==='POST',b);if(!r)throw new TypeError('Failed to fetch');
+return new Response(JSON.stringify(r[1]),{status:r[0],headers:{'Content-Type':'application/json'}})};
+window.XMLHttpRequest=class{constructor(){this.upload={};this.status=0;this.responseText=''}open(){}setRequestHeader(){}
+send(f){const tot=(f&&f.size)||1e6;let p=0;const step=()=>{p=Math.min(1,p+.07);this.upload.onprogress&&this.upload.onprogress({lengthComputable:true,loaded:p*tot,total:tot});
+if(p<1)return setTimeout(step,140);setTimeout(()=>{const nm=(f&&f.name)||'';let st=200,j={ok:true};
+if(!D.authed){st=401;j={error:'auth'}}else if(tot>4194304){st=400;j={error:'too_big'}}else if(!/signed/i.test(nm)){st=400;j={error:'bad_signature'}}
+else{const m=nm.match(/(\d+\.\d+\.\d+)/);if(m)D.fw=m[1];D.down=Date.now()+6000}
+this.status=st;this.responseText=JSON.stringify(j);this.onload&&this.onload()},700)};setTimeout(step,140)}};
+}
+})();
+</script>
+</body>
+</html>

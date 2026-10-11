@@ -61,6 +61,14 @@ struct Settings {
   int childP10, childP90; // his/her pitch range (Hz) measured during setup
   int parentP90;          // highest typical grown-up pitch (Hz), 0 = none recorded
   int nParents;
+
+  // v9: web control + schedule
+  bool webOn;             // HTTPS parent page (off by default)
+  bool resetOn;           // reset stars each morning
+  int resetMin;           // minute of day for the reset
+  bool quietOn;           // quiet hours (bedtime line)
+  int quietFromMin, quietToMin, quietLine;
+  char tz[48];            // POSIX time zone
 };
 
 extern Settings g;
