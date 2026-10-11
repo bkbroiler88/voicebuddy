@@ -33,11 +33,23 @@ Runs automatically on first boot (about 3 minutes), or from Settings › Setup:
 5. A grown-up's voice
 6. Summary, then a live zone check
 
-| Zone check | Voice step | Settings |
-|---|---|---|
-| ![Zone check](docs/screens/check.png) | ![Inside voice](docs/screens/voice.png) | ![Settings](docs/screens/settings-voice.png) |
+| Voice step | Zone check |
+|---|---|
+| ![Inside voice step](docs/screens/voice.png) | ![Live zone check](docs/screens/check.png) |
 
-**Parent settings:** hold the top-right corner for 3 seconds, then enter the PIN (default `1234`, change it under Screen).
+## Parent settings on the device
+
+Hold the top-right corner for 3 seconds, then enter the PIN (default `1234`, change it under Screen). Five tabs, in plain language:
+
+| Voice | Setup |
+|---|---|
+| ![Voice settings](docs/screens/settings-voice.png) | ![Setup settings](docs/screens/settings-setup.png) |
+
+- **Voice:** too-loud line, early warning, listen only for his/her voice, ignore bangs and noise, talk bubbles
+- **Room:** adjust for distance, live zone check, far-away adjustment, louder room higher line, WiFi & web control
+- **Stars:** time per star, daily goal, loud empties the star bar, chime, reset
+- **Screen:** brightness, LED glow, nap timer, start view, parent PIN
+- **Setup:** first-time setup, redo voice or zones only, phone dB meter match, grown-up voices, **factory reset**
 
 ## Web control (optional)
 
@@ -47,6 +59,16 @@ Turn on **Settings › Room › WiFi & web control › Web control** and open `h
 - History (today's voice level and loud moments, stars per day for a week)
 - All settings, plus a morning star reset and bedtime quiet hours
 - Signed-in browsers, settings backup/restore, restart, firmware updates
+
+| Sign in | Home | Settings |
+|---|---|---|
+| ![Sign in with the parent PIN](docs/screens/web-signin.jpg) | ![Home: live level, stars, remote](docs/screens/web-home.jpg) | ![Settings](docs/screens/web-settings.jpg) |
+
+![History: voice level today, loud moments, stars this week](docs/screens/web-history.jpg)
+
+![Device: firmware update, signed-in browsers, backup](docs/screens/web-device.jpg)
+
+Web screenshots use the page's built-in demo data (open `web/index.html#demo` in any browser to try it).
 
 **Security:** HTTPS only, with a certificate Buddy creates for itself on first use. The browser warns once because no public authority vouches for it: check that the fingerprint matches the one on Buddy's QR screen. Sessions last 30 days, 5 wrong PINs lock sign-in for 5 minutes, and Buddy shows a notice whenever a new browser signs in. Web control is off by default, and Buddy works the same without it.
 
@@ -71,6 +93,8 @@ Flash layout (16 MB): nvs 20 KB · otadata · app0 6.25 MB · app1 6.25 MB · st
 ```
 esptool.py --chip esp32s3 write_flash 0x0 bin/voicebuddy-es3c28p.bin
 ```
+
+**Start over:** Settings › Setup › Factory reset erases settings, WiFi, voices, zones, history and the web certificate, then restarts into first-time setup.
 
 **From source** ([PlatformIO](https://platformio.org/)):
 
