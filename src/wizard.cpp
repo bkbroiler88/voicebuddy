@@ -249,6 +249,31 @@ static void saveResults() {
   applyVad();
 }
 
+// ---------------------------------------------------------------- WiFi list
+static bool needScan = true;
+
+// the network rows + hints (redrawn on a tap without rescanning)
+static void drawWifiRows() {
+  tft.fillRect(0, 54, 320, 140, C_SCREEN);
+  line("Buddy uses WiFi to sense where your child is.", 62, C_DIM);
+  for (int i = 0; i < apCount; i++) {
+    int y = 74 + i * 24;
+    bool sel = i == apSel;
+    uint16_t bg = sel ? rgb(223, 231, 242) : TFT_WHITE;
+    tft.fillRoundRect(20, y, 280, 21, 6, bg);
+    tft.drawRoundRect(20, y, 280, 21, 6, sel ? C_BTN : C_PANEL);
+    tft.setTextDatum(ML_DATUM); tft.setTextColor(C_TEXT, bg);
+    char b[48];
+    bool cur = netConnected() && !strcmp(aps[i].ssid, netSsid());
+    snprintf(b, sizeof(b), "%s%s", aps[i].ssid, cur ? "  (connected)" : "");
+    tft.drawString(b, 30, y + 11, 2);
+    int bars = aps[i].rssi > -55 ? 4 : aps[i].rssi > -65 ? 3 : aps[i].rssi > -75 ? 2 : 1;
+    for (int k = 0; k < 4; k++) tft.fillRect(268 + k * 6, y + 17 - (k + 1) * 3, 4, (k + 1) * 3, k < bars ? C_TEXT : C_PANEL);
+  }
+  if (!apCount) line("No networks found. Tap Search again.", 120, C_LOUD);
+  line("Tap a network, then Next. Only 2.4 GHz networks show up.", 188, C_DIM);
+}
+
 // ---------------------------------------------------------------- screens
 // Every voice step: instructions + Start -> recording -> "Got it" + Redo / Next
 static void voicePhase(const char *leftLabel, int secs) {
@@ -290,28 +315,15 @@ static void drawStep() {
 
     case S_WIFI_LIST:
       frame("Connect to WiFi");
-      line("Searching for networks...", 110, C_DIM);
-      apCount = netScan(aps, 5);
-      apSel = 0;
-      if (netHasCreds()) for (int i = 0; i < apCount; i++) if (!strcmp(aps[i].ssid, netSsid())) apSel = i;
-      tft.fillRect(0, 56, 320, 140, C_SCREEN);
-      line("Buddy uses WiFi to sense where your child is.", 62, C_DIM);
-      for (int i = 0; i < apCount; i++) {
-        int y = 74 + i * 24;
-        bool sel = i == apSel;
-        tft.fillRoundRect(20, y, 280, 21, 6, sel ? rgb(223, 231, 242) : TFT_WHITE);
-        tft.drawRoundRect(20, y, 280, 21, 6, sel ? C_BTN : C_PANEL);
-        tft.setTextDatum(ML_DATUM); tft.setTextColor(C_TEXT, sel ? rgb(223, 231, 242) : TFT_WHITE);
-        char b[48];
-        bool cur = netConnected() && !strcmp(aps[i].ssid, netSsid());
-        snprintf(b, sizeof(b), "%s%s", aps[i].ssid, cur ? "  (connected)" : "");
-        tft.drawString(b, 30, y + 11, 2);
-        int bars = aps[i].rssi > -55 ? 4 : aps[i].rssi > -65 ? 3 : aps[i].rssi > -75 ? 2 : 1;
-        for (int k = 0; k < 4; k++) tft.fillRect(268 + k * 6, y + 17 - (k + 1) * 3, 4, (k + 1) * 3, k < bars ? C_TEXT : C_PANEL);
+      if (needScan) {                 // scan only when the screen opens or on request, never on a tap
+        line("Searching for networks...", 110, C_DIM);
+        apCount = netScan(aps, 5);
+        apSel = 0;
+        if (netHasCreds()) for (int i = 0; i < apCount; i++) if (!strcmp(aps[i].ssid, netSsid())) apSel = i;
+        needScan = false;
       }
-      if (!apCount) line("No networks found. Tap Next to search again.", 120, C_LOUD);
-      line("Only 2.4 GHz networks show up.", 192 - 6, C_DIM);
-      buttons(mode == WIZ_FULL ? "Skip WiFi" : "Back", "Next");
+      drawWifiRows();
+      buttons(mode == WIZ_FULL ? "Skip WiFi" : "Back", apCount ? "Next" : "Search again");
       break;
 
     case S_WIFI_PASS: {
@@ -438,6 +450,7 @@ static void drawStep() {
 }
 
 static void go(Step s) {
+  if (s == S_WIFI_LIST && (step != S_WIFI_PASS || apCount == 0)) needScan = true;   // back from the password keeps the list
   step = s;
   bool voice = s == S_INSIDE || s == S_EXCITED || s == S_FARVOICE || s == S_GROWNUP;
   phase = (s == S_QUIET || s == S_ZONE || voice) ? P_INTRO : P_REC;
@@ -499,10 +512,10 @@ void wizardTap(int x, int y) {
       break;
 
     case S_WIFI_LIST:
-      if (y >= 74 && y < 74 + apCount * 24 && x >= 20 && x <= 300) { apSel = (y - 74) / 24; drawStep(); return; }
+      if (y >= 74 && y < 74 + apCount * 24 && x >= 20 && x <= 300) { apSel = (y - 74) / 24; drawWifiRows(); return; }
       if (left) { if (mode == WIZ_FULL) go(S_QUIET); else finish(); }
       else if (right) {
-        if (!apCount) { drawStep(); return; }
+        if (!apCount) { needScan = true; drawStep(); return; }
         bool cur = netConnected() && !strcmp(aps[apSel].ssid, netSsid());
         if (cur) {                                   // already on this network
           if (!csiRunning()) csiStart();
