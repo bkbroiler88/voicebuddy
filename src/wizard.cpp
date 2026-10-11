@@ -46,7 +46,8 @@ static float exLvl[NEED_OTHER];  static int exN;
 static float farLvl[NEED_OTHER]; static int farN;
 static float kidHz[NEED_INSIDE + 2 * NEED_OTHER]; static int kidN;
 static float parHz[3 * NEED_OTHER]; static int parN;    // pitch, kept across "Add another"
-static float parLvl[NEED_OTHER]; static int parLvlN; // per take, only used for progress
+static float parLvl[NEED_OTHER]; static int parLvlN;
+static int kidMark, parMark;    // pitch counts at the start of a take, so Redo can drop it // per take, only used for progress
 static int quietDb = 0;
 
 // results
@@ -249,6 +250,27 @@ static void saveResults() {
 }
 
 // ---------------------------------------------------------------- screens
+// Every voice step: instructions + Start -> recording -> "Got it" + Redo / Next
+static void voicePhase(const char *leftLabel, int secs) {
+  char b[56];
+  switch (phase) {
+    case P_INTRO:
+      snprintf(b, sizeof(b), "Needs about %d s of talking.", secs);
+      line(b, 140, C_DIM);
+      line(step == S_GROWNUP ? "Tap Start when you're ready." : "Tap Start when he/she is ready.", 158);
+      buttons(leftLabel, "Start");
+      break;
+    case P_REC:
+      buttons(leftLabel, nullptr);
+      break;
+    default:
+      line("Got it!", 146, C_GOOD, 4);
+      if (step == S_GROWNUP) { line("Another grown-up can add their voice too.", 172, C_DIM); buttons("Add another", "Next"); }
+      else buttons("Redo", "Next");
+      break;
+  }
+}
+
 static void drawStep() {
   switch (step) {
     case S_WELCOME:
@@ -344,21 +366,21 @@ static void drawStep() {
       frame("Inside voice");
       line("From the Near spot, have your child say:", 64, C_DIM);
       phrase("\"Hi Buddy, I'm using my inside voice!\"", 74);
-      buttons("Cancel", nullptr);
+      voicePhase("Cancel", 10);
       break;
 
     case S_EXCITED:
       frame("Excited voice");
       line("Same spot. Now say it like cheering!", 64, C_DIM);
       phrase("\"Hi Buddy, I'm SO excited!\"", 74);
-      buttons("Skip", nullptr);
+      voicePhase("Skip", 6);
       break;
 
     case S_FARVOICE:
       frame("Inside voice, far away");
       line("From the far side of the room, say:", 64, C_DIM);
       phrase("\"Hi Buddy, I'm using my inside voice!\"", 74);
-      buttons("Skip", nullptr);
+      voicePhase("Skip", 6);
       break;
 
     case S_GROWNUP:
@@ -366,10 +388,7 @@ static void drawStep() {
       line("A parent says the phrase, so Buddy can", 62, C_DIM);
       line("tell your voices apart.", 78, C_DIM);
       phrase("\"Hi Buddy, I'm a grown-up!\"", 88);
-      if (phase == P_DONE) {
-        line("Got it. Add another grown-up?", 150, C_GOOD);
-        buttons("Add another", "Done");
-      } else buttons("Skip", nullptr);
+      voicePhase("Skip", 6);
       break;
 
     case S_SUMMARY: {
@@ -420,7 +439,8 @@ static void drawStep() {
 
 static void go(Step s) {
   step = s;
-  phase = (s == S_QUIET || s == S_ZONE) ? P_INTRO : P_REC;
+  bool voice = s == S_INSIDE || s == S_EXCITED || s == S_FARVOICE || s == S_GROWNUP;
+  phase = (s == S_QUIET || s == S_ZONE || voice) ? P_INTRO : P_REC;
   phaseStart = millis();
   if (s == S_INSIDE) { inN = 0; }
   if (s == S_EXCITED) exN = 0;
@@ -456,6 +476,20 @@ void wizardEnter(WizardMode m) {
 }
 
 // ---------------------------------------------------------------- input
+static void startTake() {
+  switch (step) {
+    case S_INSIDE:   inN = 0; break;
+    case S_EXCITED:  exN = 0; break;
+    case S_FARVOICE: farN = 0; break;
+    case S_GROWNUP:  parLvlN = 0; break;
+    default: break;
+  }
+  note = nullptr;
+  phase = P_REC;
+  phaseStart = lastSample = millis();
+  drawStep();
+}
+
 void wizardTap(int x, int y) {
   bool left = y >= 196 && x < 120, right = y >= 196 && x >= 200;
   switch (step) {
@@ -512,18 +546,23 @@ void wizardTap(int x, int y) {
       break;
 
     case S_INSIDE:
-      if (left) cancel();
-      break;
     case S_EXCITED:
     case S_FARVOICE:
-      if (left) advance();     // skip
-      break;
-
     case S_GROWNUP:
       if (phase == P_DONE) {
-        if (left) { phase = P_REC; phaseStart = millis(); parLvlN = 0; drawStep(); }
-        else if (right) go(S_SUMMARY);
-      } else if (left) go(S_SUMMARY);
+        if (right) { advance(); return; }
+        if (!left) return;
+        if (step == S_GROWNUP) parMark = parN;   // "Add another": keep the first grown-up
+        else kidN = kidMark;                     // "Redo": drop this take's pitch samples
+        startTake();
+      } else if (left) {
+        if (step == S_GROWNUP) { parN = parMark; go(S_SUMMARY); }
+        else if (step == S_INSIDE) cancel();
+        else { kidN = kidMark; advance(); }      // skip
+      } else if (right && phase == P_INTRO) {
+        kidMark = kidN; parMark = parN;
+        startTake();
+      }
       break;
 
     case S_SUMMARY:
@@ -568,8 +607,9 @@ static void voiceTick(float *lvl, int &n, int need, int barY, uint16_t col, bool
 
   bool done = n >= need, timeout = now - phaseStart > VOICE_TIMEOUT;
   if (done || (timeout && n >= MIN_ACCEPT)) {
-    if (step == S_GROWNUP) { phase = P_DONE; drawStep(); }
-    else advance();
+    phase = P_DONE;
+    setPixel(0, 0, 0);
+    drawStep();
   } else if (timeout) {
     note = "Didn't hear enough voice. Let's try again.";
     n = 0;
@@ -642,10 +682,10 @@ void wizardTick() {
       break;
     }
 
-    case S_INSIDE:   voiceTick(inLvl, inN, NEED_INSIDE, VOICE_BAR_Y, C_GOOD, true); break;
-    case S_EXCITED:  voiceTick(exLvl, exN, NEED_OTHER, VOICE_BAR_Y, C_WARN, true); break;
+    case S_INSIDE:   if (phase == P_REC) voiceTick(inLvl, inN, NEED_INSIDE, VOICE_BAR_Y, C_GOOD, true); break;
+    case S_EXCITED:  if (phase == P_REC) voiceTick(exLvl, exN, NEED_OTHER, VOICE_BAR_Y, C_WARN, true); break;
     case S_FARVOICE: {
-      voiceTick(farLvl, farN, NEED_OTHER, VOICE_BAR_Y, C_GOOD, true);
+      if (phase == P_REC) voiceTick(farLvl, farN, NEED_OTHER, VOICE_BAR_Y, C_GOOD, true);
       if (step == S_FARVOICE && now - lastLive > 500) {
         lastLive = now;
         char b[40];
