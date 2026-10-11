@@ -12,6 +12,8 @@ Built for the **Freenove FNK0104B** (also sold as **LCDWIKI ES3C28P**): black ES
 
 All screenshots are captured from the device itself (`tools/screenshot.py`).
 
+**Parent manual:** [Voice-Buddy-Manual.pdf](docs/Voice-Buddy-Manual.pdf) (12 pages: setup, settings, web control, updates, troubleshooting). Source: [docs/MANUAL.md](docs/MANUAL.md), rebuilt with `python tools/build_manual.py`.
+
 ## What it does
 
 - **Four views, swipe to switch:** police pup, dial, Saturn, and a solar system where planets light up outward as the voice gets louder.
