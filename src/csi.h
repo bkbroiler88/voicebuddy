@@ -2,25 +2,33 @@
 #include <Arduino.h>
 #include "settings.h"
 
-// WiFi CSI proximity: listens (promiscuous, no password needed) to frames from one
-// router and measures how much a body near the board disturbs the channel.
-// Output is a coarse zone, not a distance -- it must be calibrated per room.
+// WiFi CSI zones. While connected to the home router (see wifi_net), frames from the
+// router are captured with their per-subcarrier amplitudes. Every 0.5 s a window
+// feature is built: the amplitude shape of all 52 subcarriers plus how much each one
+// wobbles. The first-run setup trains an average feature per zone (empty room, near,
+// mid, far); live windows are matched to the closest trained zone with a confidence.
 
-struct ApInfo { char ssid[33]; uint8_t bssid[6]; int channel; int rssi; };
-
-void  csiBegin(const uint8_t bssid[6], int channel);
+bool  csiStart();            // needs netConnected(); starts capture + router traffic
 void  csiStop();
 bool  csiRunning();
-int   csiScan(ApInfo *out, int maxN);   // blocking ~3 s; restarts CSI afterwards if it was running
-void  csiTick();                        // call often from loop()
+void  csiTick();             // call often from loop()
 
-float csiScore();
 int   csiPps();
-Zone  csiZone();                        // stable zone (hysteresis applied)
+float csiMotion();           // 0..1, self-normalising movement level
 
-// Calibration capture: lead-in then capture; results are written into g.calScore / g.baseline
-void  csiStartCal(Zone z);
-bool  csiCalBusy();
-int   csiCalSecondsLeft();              // >0 lead-in, <0 capturing (negated), 0 idle
-Zone  csiCalZone();
+Zone  csiZone();             // stable zone (held 2 s), Z_UNKNOWN if unsure
+float csiConfidence();       // confidence of the stable zone 0..1
+Zone  csiLiveZone();         // instant best match, for the live check screen
+float csiLiveConfidence();
+
+// Training (driven by the setup wizard)
+void  csiTrainBegin(Zone z);
+int   csiTrainEnd();         // finalises the zone, returns windows used
+bool  csiTraining();
+bool  csiModelReady();       // empty room + at least two places trained
+bool  csiZoneTrained(Zone z);
+void  csiModelSave();
+void  csiModelLoad();
+void  csiModelClear();
+
 const char *zoneName(Zone z);

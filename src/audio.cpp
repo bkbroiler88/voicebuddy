@@ -151,8 +151,9 @@ static int16_t chimeSample(int pos) {
 static float s_vadBuf[VAD_N];
 static int   s_vadPos = 0;
 
-static volatile int s_lagLo = VAD_LAGMIN, s_lagHi = VAD_LAGMAX;   // pitch band as lags
+static volatile float s_bandLo = 0, s_bandHi = 0;   // accepted pitch band in Hz (0 = any)
 static volatile float s_pitchHz = 0;
+static float s_ac[VAD_LAGMAX + 1];
 
 // Single-precision on purpose: the S3 FPU has no hardware double.
 static inline float autocorr(const float *x, int lag) {
@@ -162,27 +163,36 @@ static inline float autocorr(const float *x, int lag) {
   return r;
 }
 
-static float voicingPeak(const float *x, int &bestLag) {
-  bestLag = 0;
+// Voicing strength 0..1 and the fundamental period, searched over the WHOLE range.
+// The band check happens afterwards: searching only inside a band let an adult's
+// overtones pass as a child's voice.
+static float voicingPeak(const float *x, int &periodLag) {
+  periodLag = 0;
   float r0 = autocorr(x, 0);
   if (r0 < 1.f) return 0;
-  int lagLo = s_lagLo, lagHi = s_lagHi;
-  // skip the main lobe: start searching after the autocorrelation first goes negative
-  int lag = 1;
-  while (lag < lagHi && autocorr(x, lag) >= 0) lag++;
-  if (lag < lagLo) lag = lagLo;
+  // skip the main lobe: start after the autocorrelation first goes negative
+  int start = 1;
+  while (start < VAD_LAGMAX && autocorr(x, start) >= 0) start++;
+  if (start < VAD_LAGMIN) start = VAD_LAGMIN;
   float best = 0;
-  for (; lag <= lagHi; lag++) {
+  for (int lag = start; lag <= VAD_LAGMAX; lag++) {
     float v = autocorr(x, lag) / r0 * VAD_N / (VAD_N - lag);   // unbias for the shorter overlap
-    if (v > best) { best = v; bestLag = lag; }
+    s_ac[lag] = v;
+    if (v > best) best = v;
+  }
+  if (best <= 0) return 0;
+  // a periodic sound also peaks at 2x, 3x the period; take the SHORTEST lag that
+  // is a local peak and nearly as strong as the best (avoids octave-down errors)
+  for (int lag = start + 1; lag < VAD_LAGMAX; lag++) {
+    float v = s_ac[lag];
+    if (v >= 0.85f * best && v >= s_ac[lag - 1] && v >= s_ac[lag + 1]) { periodLag = lag; break; }
   }
   return best > 1.f ? 1.f : best;
 }
 
 void audioSetPitchBand(int loHz, int hiHz) {
-  if (loHz <= 0 || hiHz <= loHz) { s_lagLo = VAD_LAGMIN; s_lagHi = VAD_LAGMAX; return; }
-  s_lagLo = constrain(AUDIO_RATE / hiHz, VAD_LAGMIN, VAD_LAGMAX);
-  s_lagHi = constrain(AUDIO_RATE / loHz, VAD_LAGMIN, VAD_LAGMAX);
+  if (loHz <= 0 || hiHz <= loHz) { s_bandLo = 0; s_bandHi = 0; return; }
+  s_bandLo = loHz; s_bandHi = hiHz;
 }
 float audioPitchHz() { return s_pitchHz; }
 
@@ -232,9 +242,11 @@ static void audioTask(void *) {
         s_voicing = v;
         s_vadPos = 0;
         bool loudEnough = db > noise + s_noiseMargin;
-        if (v >= s_vadThresh && loudEnough) {
-          hang = 0.30f;   // bridges consonants and short pauses
-          s_pitchHz = lag > 0 ? (float)AUDIO_RATE / lag : 0;
+        if (v >= s_vadThresh && loudEnough && lag > 0) {
+          float f0 = (float)AUDIO_RATE / lag;
+          s_pitchHz = f0;                   // reported for any voice (setup measures grown-ups too)
+          bool inBand = s_bandHi <= 0 || (f0 >= s_bandLo && f0 <= s_bandHi);
+          if (inBand) hang = 0.30f;         // bridges consonants and short pauses
         }
       }
       hang -= dt;

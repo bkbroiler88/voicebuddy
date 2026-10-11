@@ -2,7 +2,7 @@
 #include <Preferences.h>
 #include <stddef.h>
 
-#define SETTINGS_VERSION 7
+#define SETTINGS_VERSION 8
 
 Settings g;
 static Preferences prefs;
@@ -36,6 +36,8 @@ void settingsDefaults() {
   g.noiseMargin = 6;
   // voice setup fields default to 0 / off until the setup is run
   g.bubbles    = true;
+  g.lombard    = true;
+  g.roomNoiseDb = 35;
 }
 
 // Fields are only ever appended, so an older blob is a valid prefix of the current
@@ -45,6 +47,7 @@ static size_t blobSizeForVersion(uint32_t v) {
     case 4: return offsetof(Settings, speechOnly);
     case 5: return offsetof(Settings, pitchLo);
     case 6: return offsetof(Settings, bubbles);
+    case 7: return offsetof(Settings, setupDone);
     case SETTINGS_VERSION: return sizeof(Settings);
     default: return 0;
   }

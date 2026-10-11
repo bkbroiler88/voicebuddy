@@ -53,6 +53,14 @@ struct Settings {
 
   // v7
   bool bubbles;           // Buddy says short phrases in speech bubbles
+
+  // v8: first-run setup
+  bool setupDone;
+  bool lombard;           // louder room raises the line a little
+  int roomNoiseDb;        // background measured during setup (approx dB SPL)
+  int childP10, childP90; // his/her pitch range (Hz) measured during setup
+  int parentP90;          // highest typical grown-up pitch (Hz), 0 = none recorded
+  int nParents;
 };
 
 extern Settings g;

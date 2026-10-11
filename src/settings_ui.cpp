@@ -1,0 +1,274 @@
+// Parent settings: five tabs of plain-language rows (label + one-line explanation).
+
+#include <Arduino.h>
+#include "ui.h"
+#include "settings.h"
+#include "audio.h"
+#include "csi.h"
+#include "wifi_net.h"
+
+typedef void (*TextFn)(char *, size_t);
+typedef void (*ActFn)();
+typedef void (*FmtFn)(int, char *, size_t);
+
+enum Kind : uint8_t { K_PM, K_TOG, K_ACT };
+struct SRow {
+  Kind kind;
+  const char *label;
+  const char *sub;  TextFn subFn;           // static or live explanation line
+  int *val; int mn, mx, step; FmtFn fmt;    // K_PM
+  bool *flag;                               // K_TOG
+  const char *btn; TextFn btnFn; ActFn act; // K_ACT
+  ActFn onChange;
+};
+
+#define PM(l, s, sf, v, mn, mx, st, f, cb) {K_PM, l, s, sf, v, mn, mx, st, f, nullptr, nullptr, nullptr, nullptr, cb}
+#define TOG(l, s, sf, p, cb)               {K_TOG, l, s, sf, nullptr, 0, 0, 0, nullptr, p, nullptr, nullptr, nullptr, cb}
+#define ACT(l, s, sf, b, bf, a)            {K_ACT, l, s, sf, nullptr, 0, 0, 0, nullptr, nullptr, b, bf, a, nullptr}
+
+static int curTab = 0;
+static char toast[48] = "";
+static uint32_t toastMs = 0;
+static int napMin;                          // g.sleepAfter shown in minutes
+
+static void say(const char *m) { strncpy(toast, m, sizeof(toast) - 1); toastMs = millis(); }
+
+// ---------------- formatters / live text ----------------
+static void fDb(int v, char *b, size_t n)   { snprintf(b, n, "%d dB", v); }
+static void fSec(int v, char *b, size_t n)  { snprintf(b, n, "%d s", v); }
+static void fNum(int v, char *b, size_t n)  { snprintf(b, n, "%d", v); }
+static void fPct(int v, char *b, size_t n)  { snprintf(b, n, "%d%%", v); }
+static void fMin(int v, char *b, size_t n)  { snprintf(b, n, "%d min", v); }
+
+static void subWhere(char *b, size_t n) {
+  if (!csiRunning()) { snprintf(b, n, "WiFi not connected"); return; }
+  if (!csiModelReady()) { snprintf(b, n, "Room zones not set up yet"); return; }
+  Zone z = csiZone();
+  if (z == Z_UNKNOWN) snprintf(b, n, "Live: not sure");
+  else snprintf(b, n, "Live: %s, %d%% sure", z == Z_EMPTY ? "nobody" : zoneName(z), (int)(csiConfidence() * 100));
+}
+static void subWifi(char *b, size_t n) {
+  if (!netHasCreds()) snprintf(b, n, "Not set up");
+  else if (!netConnected()) snprintf(b, n, "%.18s, not connected", netSsid());
+  else snprintf(b, n, "%.18s, %d pkt/s", netSsid(), csiPps());
+}
+static void subVoiceOnly(char *b, size_t n) {
+  if (g.pitchHi <= 0) snprintf(b, n, "Run his/her voice setup first");
+  else snprintf(b, n, "Ignores grown-ups (%d-%d Hz)", g.pitchLo, g.pitchHi);
+}
+static void subCal(char *b, size_t n) { snprintf(b, n, "Buddy hears %.0f dB now", audioLevelDbfs() + g.calOffset); }
+static void subParents(char *b, size_t n) {
+  if (g.nParents <= 0) snprintf(b, n, "None saved yet");
+  else snprintf(b, n, "%d saved", g.nParents);
+}
+static void subSetup(char *b, size_t n) { snprintf(b, n, g.setupDone ? "Room, zones and voices (3 min)" : "Not finished yet (3 min)"); }
+
+static const char *const VIEWS[4] = {"Pup", "Dial", "Saturn", "Planets"};
+static void btnView(char *b, size_t n) { snprintf(b, n, "%s", VIEWS[constrain(g.view, 0, 3)]); }
+
+// ---------------- actions ----------------
+static void aCheck()      { wizardEnter(WIZ_CHECK); }
+static void aWifi()       { wizardEnter(WIZ_WIFI); }
+static void aResetStars() { g.stars = 0; resetStarProgress(); settingsSave(); say("Stars reset to 0"); }
+static void aView()       { g.view = (g.view + 1) % 4; }
+static void aPin()        { enterPinSet(); }
+static void aFull()       { wizardEnter(WIZ_FULL); }
+static void aVoice()      { wizardEnter(WIZ_VOICE); }
+static void aZones() {
+  if (!netConnected()) { say("Connect WiFi first (Room tab)"); return; }
+  if (!csiRunning()) csiStart();
+  wizardEnter(WIZ_ZONES);
+}
+static void aParent() {
+  if (g.childP10 <= 0) { say("Do his/her voice setup first"); return; }
+  wizardEnter(WIZ_GROWNUP);
+}
+static void cDist() {
+  if (g.distOn && !csiModelReady()) say("Set up room zones to use this");
+}
+static void cFar()    { g.midOffset = g.farOffset / 2; }
+static void cBright() { applyBrightness(); }
+static void cNap()    { g.sleepAfter = napMin * 60; }
+static void cVad()    { applyVad(); }
+
+// ---------------- pages ----------------
+static SRow tabVoice[] = {
+  PM("Too-loud line", "Where Buddy covers his ears", nullptr, &g.loudDb, 40, 100, 1, fDb, nullptr),
+  PM("Early warning", "Yellow starts this much sooner", nullptr, &g.warnMargin, 2, 15, 1, fDb, nullptr),
+  TOG("Listen only for his/her voice", nullptr, subVoiceOnly, &g.hisVoiceOnly, cVad),
+  TOG("Ignore bangs and noise", "Only voices move the meter", nullptr, &g.speechOnly, nullptr),
+  TOG("Talk bubbles", "Buddy says short phrases", nullptr, &g.bubbles, nullptr),
+};
+static SRow tabRoom[] = {
+  TOG("Adjust for distance", "Lower the line when he/she is far", nullptr, &g.distOn, cDist),
+  ACT("Where is he/she?", nullptr, subWhere, "Check", nullptr, aCheck),
+  PM("Far-away adjustment", "Measured during setup", nullptr, &g.farOffset, -20, 0, 1, fDb, cFar),
+  TOG("Louder room, higher line", "Allow a bit more over the TV", nullptr, &g.lombard, nullptr),
+  ACT("WiFi", nullptr, subWifi, "Change", nullptr, aWifi),
+};
+static SRow tabStars[] = {
+  PM("Star every", "His/her voice time per star", nullptr, &g.starEvery, 15, 300, 5, fSec, nullptr),
+  PM("Daily goal", "Stars for the big celebration", nullptr, &g.dailyGoal, 3, 30, 1, fNum, nullptr),
+  TOG("Loud empties the star bar", "Otherwise it only pauses", nullptr, &g.loudResets, nullptr),
+  TOG("Chime", "Soft sound for each star", nullptr, &g.chime, nullptr),
+  ACT("Today's stars", "Back to 0, e.g. each morning", nullptr, "Reset", nullptr, aResetStars),
+};
+static SRow tabScreen[] = {
+  PM("Brightness", "Screen backlight", nullptr, &g.brightness, 10, 100, 10, fPct, cBright),
+  TOG("Back light glow", "LED matches Buddy's mood", nullptr, &g.ledGlow, nullptr),
+  PM("Nap after quiet", "Buddy naps when it's quiet", nullptr, &napMin, 1, 15, 1, fMin, cNap),
+  ACT("Start on", "Main view after power-up", nullptr, nullptr, btnView, aView),
+  ACT("Parent PIN", "Hold top-right corner 3 s to open", nullptr, "Change", nullptr, aPin),
+};
+static SRow tabSetup[] = {
+  ACT("First-time setup", nullptr, subSetup, "Start", nullptr, aFull),
+  ACT("Redo his/her voice only", "If he/she has grown or it's off", nullptr, "Start", nullptr, aVoice),
+  ACT("Redo room zones only", "After moving furniture or Buddy", nullptr, "Start", nullptr, aZones),
+  PM("Match a phone dB meter", nullptr, subCal, &g.calOffset, 60, 140, 1, fNum, nullptr),
+  ACT("Grown-up voices", nullptr, subParents, "Add", nullptr, aParent),
+};
+
+struct Tab { const char *name; SRow *rows; int n; };
+static Tab tabs[NTABS] = {
+  {"Voice", tabVoice, 5}, {"Room", tabRoom, 5}, {"Stars", tabStars, 5}, {"Screen", tabScreen, 5}, {"Setup", tabSetup, 5},
+};
+
+#define ROW_Y(i) (32 + (i) * 35)
+#define TAB_W 64
+
+// ---------------- drawing ----------------
+static void drawSub(int i) {
+  SRow &r = tabs[curTab].rows[i];
+  int y = ROW_Y(i);
+  char b[56];
+  if (r.subFn) r.subFn(b, sizeof(b)); else snprintf(b, sizeof(b), "%s", r.sub ? r.sub : "");
+  int textW = (r.kind == K_PM) ? 186 : (r.kind == K_TOG ? 222 : 202);
+  tft.fillRect(6, y + 21, textW, 10, C_SCREEN);
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(C_DIM, C_SCREEN);
+  tft.drawString(b, 8, y + 22, 1);
+}
+
+static void drawControl(int i) {
+  SRow &r = tabs[curTab].rows[i];
+  int y = ROW_Y(i);
+  char b[24];
+  switch (r.kind) {
+    case K_PM:
+      r.fmt(*r.val, b, sizeof(b));
+      tft.fillRect(233, y + 3, 46, 28, C_SCREEN);
+      tft.setTextDatum(MC_DATUM);
+      tft.setTextColor(C_TEXT, C_SCREEN);
+      tft.drawString(b, 256, y + 17, 2);
+      break;
+    case K_TOG:
+      drawButton(232, y + 5, 80, 24, *r.flag ? "ON" : "OFF", *r.flag ? C_ON : C_OFF, C_BTN_TX);
+      break;
+    case K_ACT:
+      if (r.btnFn) r.btnFn(b, sizeof(b)); else snprintf(b, sizeof(b), "%s", r.btn);
+      drawButton(212, y + 5, 100, 24, b, C_BTN, C_BTN_TX);
+      break;
+  }
+}
+
+static void drawRow(int i) {
+  SRow &r = tabs[curTab].rows[i];
+  int y = ROW_Y(i);
+  tft.fillRect(0, y, 320, 34, C_SCREEN);
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(C_TEXT, C_SCREEN);
+  tft.drawString(r.label, 8, y + 4, 2);
+  if (r.kind == K_PM) {
+    drawButton(196, y + 5, 36, 24, "-", C_BTN, C_BTN_TX);
+    drawButton(280, y + 5, 36, 24, "+", C_BTN, C_BTN_TX);
+  }
+  drawSub(i);
+  drawControl(i);
+  tft.drawFastHLine(6, y + 34, 308, C_PANEL);
+}
+
+static void drawFooter() {
+  char b[56];
+  bool t = toast[0] && millis() - toastMs < 3000;
+  if (t) snprintf(b, sizeof(b), "%s", toast);
+  else switch (curTab) {
+    case TAB_VOICE:  snprintf(b, sizeof(b), "Now: %.0f dB  (line %.0f)", currentLevelDb(), currentLimitDb()); break;
+    case TAB_ROOM:   snprintf(b, sizeof(b), "Room background: %.0f dB", audioNoiseDbfs() + g.calOffset); break;
+    case TAB_STARS:  snprintf(b, sizeof(b), "Today: %d of %d stars", g.stars, g.dailyGoal); break;
+    case TAB_SCREEN: snprintf(b, sizeof(b), "Saved when you tap Done"); break;
+    default:         snprintf(b, sizeof(b), g.setupDone ? "Setup is done" : "Setup isn't finished yet"); break;
+  }
+  tft.fillRect(0, 210, 236, 30, C_SCREEN);
+  tft.setTextDatum(ML_DATUM);
+  tft.setTextColor(t ? C_ON : C_DIM, C_SCREEN);
+  tft.drawString(b, 8, 226, 2);
+}
+
+static void drawAll() {
+  tft.fillScreen(C_SCREEN);
+  for (int i = 0; i < NTABS; i++) {
+    bool on = i == curTab;
+    tft.fillRect(i * TAB_W, 0, TAB_W, 28, on ? C_TAB : C_PANEL);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(on ? C_BTN_TX : C_TEXT, on ? C_TAB : C_PANEL);
+    tft.drawString(tabs[i].name, i * TAB_W + TAB_W / 2, 14, 2);
+  }
+  for (int i = 0; i < tabs[curTab].n; i++) drawRow(i);
+  drawButton(240, 212, 76, 26, "Done", C_ON, C_BTN_TX);
+  drawFooter();
+}
+
+// ---------------- public ----------------
+void settingsEnter(int tab) {
+  screen = SCR_SETTINGS;
+  curTab = constrain(tab, 0, NTABS - 1);
+  napMin = max(1, g.sleepAfter / 60);
+  toast[0] = 0;
+  setPixel(0, 0, 0);
+  drawAll();
+}
+
+bool settingsTap(int x, int y) {
+  if (y < 28) {
+    int t = x / TAB_W;
+    if (t >= 0 && t < NTABS && t != curTab) { curTab = t; drawAll(); }
+    return false;
+  }
+  if (y >= 208 && x >= 236) { settingsSave(); applyVad(); enterChild(); return false; }
+  for (int i = 0; i < tabs[curTab].n; i++) {
+    int ry = ROW_Y(i);
+    if (y < ry || y >= ry + 35) continue;
+    SRow &r = tabs[curTab].rows[i];
+    switch (r.kind) {
+      case K_PM:
+        if (x >= 190 && x < 240)      *r.val = max(r.mn, *r.val - r.step);
+        else if (x >= 272)            *r.val = min(r.mx, *r.val + r.step);
+        else return false;
+        if (r.onChange) r.onChange();
+        drawControl(i);
+        return true;
+      case K_TOG:
+        if (x < 228) return false;
+        *r.flag = !*r.flag;
+        if (r.onChange) r.onChange();
+        drawControl(i);
+        drawSub(i);
+        drawFooter();
+        return false;
+      case K_ACT:
+        if (x < 208) return false;
+        r.act();
+        if (screen == SCR_SETTINGS) { drawControl(i); drawSub(i); drawFooter(); }
+        return false;
+    }
+  }
+  return false;
+}
+
+void settingsTick() {
+  static uint32_t last = 0;
+  if (millis() - last < 300) return;
+  last = millis();
+  for (int i = 0; i < tabs[curTab].n; i++) if (tabs[curTab].rows[i].subFn) drawSub(i);
+  drawFooter();
+}

@@ -5,8 +5,11 @@
 //   nice talking -> smiles, and earns stars over time
 //   getting loud -> eyes go wide (soft yellow)
 //   too loud     -> gently covers his ears (soft peach) until it is calm again
-// Optional WiFi-CSI proximity shifts the limits so a normal voice from across
-// the room is judged the same as from up close (sound drops ~6 dB per doubling).
+// WiFi-CSI zones (trained in the first-run setup) shift the limits so a normal voice
+// from across the room is judged the same as from up close.
+//
+// Cores: Core 0 runs the audio/pitch task and the CSI sensing task; Core 1 (this loop)
+// only draws and handles touch. Sprites live in PSRAM.
 //
 // Parent settings: hold the top-right corner for 3 s, then enter the PIN (default 1234).
 
@@ -21,18 +24,20 @@
 #include "audio.h"
 #include "touch.h"
 #include "csi.h"
+#include "wifi_net.h"
 #include "buddy.h"
+#include "ui.h"
 
-static TFT_eSPI tft;
+TFT_eSPI tft;
 static TFT_eSprite sprBuddy(&tft);
 static TFT_eSprite sprMeter(&tft);
 static TFT_eSprite sprDial(&tft);
 static Adafruit_NeoPixel pixel(1, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 
-static uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) { return tft.color565(r, g, b); }
+uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) { return tft.color565(r, g, b); }
 
-static uint16_t C_SCREEN, C_PANEL, C_TEXT, C_DIM, C_BTN, C_BTN_TX, C_ON, C_OFF,
-                C_GOOD, C_WARN, C_LOUD, C_GOLD, C_TAB;
+uint16_t C_SCREEN, C_PANEL, C_TEXT, C_DIM, C_BTN, C_BTN_TX, C_ON, C_OFF,
+         C_GOOD, C_WARN, C_LOUD, C_GOLD, C_TAB;
 
 // ---------------- layout ----------------
 #define BUDDY_X 0
@@ -48,8 +53,7 @@ static uint16_t C_SCREEN, C_PANEL, C_TEXT, C_DIM, C_BTN, C_BTN_TX, C_ON, C_OFF,
 #define DIAL_H 210
 enum ViewId { V_PUP = 0, V_DIAL, V_SATURN, V_SOLAR, NVIEWS };   // swipe order
 
-enum Screen { SCR_CHILD, SCR_PIN, SCR_SETTINGS, SCR_VOICESETUP };
-static Screen screen = SCR_CHILD;
+Screen screen = SCR_CHILD;
 
 // ---------------- voice state ----------------
 enum Voice { V_QUIET, V_NICE, V_ALERT, V_LOUD };
@@ -67,21 +71,32 @@ static float skyR = 27, skyG = 36, skyB = 72;
 
 static int  lastStarsDrawn = -1, lastGoalDrawn = -1, lastProgPx = -1;
 
-static float applyBrightness() {
+void applyBrightness() {
   analogWrite(BACKLIGHT_PIN, map(g.brightness, 10, 100, 25, 255));
-  return 0;
 }
 
 static float zoneOffset(Zone z) {
-  bool anyCal = false;
-  for (int i = 0; i < 4; i++) if (g.calScore[i] >= 0) anyCal = true;
-  if (!g.distOn || !csiRunning() || !anyCal) return 0;
+  if (!g.distOn || !csiRunning() || !csiModelReady()) return 0;
   switch (z) {
     case Z_NEAR: return 0;
     case Z_FAR:  return g.farOffset;
     case Z_MID:  return g.midOffset;
     default:     return g.midOffset;   // unknown / looks empty but someone is talking
   }
+}
+
+// People talk louder over a TV: when the room is much louder than it was during
+// setup, let the line rise a little (half a dB per dB, at most 8 dB).
+static float lombardBonus() {
+  if (!g.lombard) return 0;
+  float excess = (audioNoiseDbfs() + g.calOffset) - g.roomNoiseDb - 10.f;
+  return excess > 0 ? fminf(8.f, 0.5f * excess) : 0;
+}
+
+void applyVad() {
+  audioSetVad(0.80f - 0.05f * g.vadSens, g.noiseMargin);
+  if (g.hisVoiceOnly && g.pitchHi > g.pitchLo) audioSetPitchBand(g.pitchLo, g.pitchHi);
+  else audioSetPitchBand(0, 0);
 }
 
 // ======================================================================
@@ -160,7 +175,7 @@ static void drawMeter(float effLoud, float effWarn, float effFloor) {
   s.pushSprite(METER_X, METER_Y);
 }
 
-static void setPixel(uint8_t r, uint8_t g8, uint8_t b) {
+void setPixel(uint8_t r, uint8_t g8, uint8_t b) {
   static uint32_t last = 0xFFFFFFFF;
   uint32_t c = pixel.Color(r, g8, b);
   if (c == last) return;
@@ -179,11 +194,17 @@ static void earnStar() {
   Serial.printf("[star] %d/%d\n", g.stars, g.dailyGoal);
 }
 
-static void enterChild() {
+void enterChild() {
   screen = SCR_CHILD;
   tft.fillScreen(C_SCREEN);
   drawTopBar(true);
 }
+
+void resetStarProgress() { starProgress = 0; }
+
+static float limitNow() { return g.loudDb + distOffset + lombardBonus(); }
+float currentLimitDb() { return limitNow(); }
+float currentLevelDb() { return (g.speechOnly ? audioSpeechDbfs() : audioLevelDbfs()) + g.calOffset; }
 
 static void updateVoice(float dt, float effLoud, float effWarn, float effFloor) {
   // voiceNow: sound that is actually voice right now (no long hold), used for stars
@@ -243,6 +264,7 @@ static const char *bubble = nullptr;
 static float bubbleLeft = 0;     // seconds; >= 1000 means "while this mood lasts"
 static Mood prevMood = M_CALM;
 static float praiseT = 0;
+static int demoMood = -1;        // >= 0: mood forced over serial for screenshots
 
 static void say(const char *text, float secs) { bubble = text; bubbleLeft = secs; }
 
@@ -283,13 +305,25 @@ static void childFrame(float dt) {
   if (distOffset < target) distOffset = fminf(target, distOffset + step);
   else                     distOffset = fmaxf(target, distOffset - step);
 
-  float effLoud  = g.loudDb + distOffset;
+  float effLoud  = limitNow();
   float effWarn  = effLoud - g.warnMargin;
   float effFloor = g.floorDb + distOffset;
-  lvlSpl = (g.speechOnly ? audioSpeechDbfs() : audioLevelDbfs()) + g.calOffset;
+  lvlSpl = currentLevelDb();
 
-  updateVoice(dt, effLoud, effWarn, effFloor);
-  updateBubble(dt);
+  if (demoMood >= 0) {
+    // screenshot/demo mode (serial 'S'): fixed mood and a level that matches it
+    mood = (Mood)demoMood;
+    switch (mood) {
+      case M_LOUD:   lvlSpl = effLoud + 5; break;
+      case M_ALERT:  lvlSpl = effWarn + 2; break;
+      case M_CALM:
+      case M_SLEEPY: lvlSpl = effFloor - 4; break;
+      default:       lvlSpl = (effFloor + effWarn) / 2; break;
+    }
+  } else {
+    updateVoice(dt, effLoud, effWarn, effFloor);
+    updateBubble(dt);
+  }
 
   // animation targets
   animT += dt;
@@ -395,11 +429,11 @@ static void enterPin(PinMode m) {
   drawPinDots();
 }
 
-static void enterSettings(int tab);
+void enterPinSet() { enterPin(PIN_SET); }
 
 static void pinTap(int tx, int ty) {
   if (tx < 50 && ty < 38) {
-    if (pinMode_ == PIN_SET) enterSettings(5); else enterChild();   // back to SYS tab
+    if (pinMode_ == PIN_SET) settingsEnter(TAB_SCREEN); else enterChild();
     return;
   }
   for (int i = 0; i < 12; i++) {
@@ -413,10 +447,10 @@ static void pinTap(int tx, int ty) {
       if (pinMode_ == PIN_SET) {
         strcpy(g.pin, pinBuf);
         settingsSave();
-        enterSettings(5);   // SYS tab
+        settingsEnter(TAB_SCREEN);
         return;
       }
-      if (strcmp(pinBuf, g.pin) == 0) { pinFails = 0; enterSettings(0); return; }
+      if (strcmp(pinBuf, g.pin) == 0) { pinFails = 0; settingsEnter(TAB_VOICE); return; }
       pinLen = 0;
       if (++pinFails >= 3) { pinFails = 0; enterChild(); return; }
     } else if (pinLen < 4) {
@@ -428,507 +462,24 @@ static void pinTap(int tx, int ty) {
 }
 
 // ======================================================================
-//  Settings
+//  Shared drawing helper (settings_ui.cpp and wizard.cpp use it too)
 // ======================================================================
-enum RowType : uint8_t { R_VALUE, R_TOGGLE, R_ACTION, R_READOUT };
-typedef void (*TextFn)(char *, size_t);
-typedef void (*ActFn)();
-
-struct Row {
-  RowType type;
-  const char *label;
-  int *val; int mn, mx, step; const char *unit;
-  bool *flag;
-  ActFn act; const char *btn;
-  TextFn text;
-  ActFn onChange;
-};
-
-// ---- live readouts / actions ----
-static void txtLevel(char *b, size_t n) {
-  float off = zoneOffset(csiZone());
-  snprintf(b, n, "now %.0f dB   limit %.0f", audioLevelDbfs() + g.calOffset, g.loudDb + off);
-}
-static void txtDistLive(char *b, size_t n) {
-  if (!g.distOn) { snprintf(b, n, "off"); return; }
-  if (!csiRunning()) { snprintf(b, n, "pick a router first"); return; }
-  snprintf(b, n, "%s  %d pkt/s  adj %+.0f dB", zoneName(csiZone()), csiPps(), zoneOffset(csiZone()));
-}
-static void txtCalLive(char *b, size_t n) {
-  if (!csiRunning()) { snprintf(b, n, "turn Distance on first"); return; }
-  snprintf(b, n, "score %.3f  %d pkt/s  %s", csiScore(), csiPps(), zoneName(csiZone()));
-}
-static void txtRouter(char *b, size_t n) {
-  if (g.channel <= 0) snprintf(b, n, "none");
-  else snprintf(b, n, "%.12s c%d", g.ssid, g.channel);
-}
-static void txtCal(Zone z, char *b, size_t n) {
-  if (csiCalBusy() && csiCalZone() == z) {
-    int s = csiCalSecondsLeft();
-    if (s > 0) snprintf(b, n, "wait %d", s); else snprintf(b, n, "rec %d", -s);
-  } else if (g.calScore[z] < 0) snprintf(b, n, "--");
-  else snprintf(b, n, "%.3f", g.calScore[z]);
-}
-static void txtCalEmpty(char *b, size_t n) { txtCal(Z_EMPTY, b, n); }
-static void txtCalNear(char *b, size_t n)  { txtCal(Z_NEAR, b, n); }
-static void txtCalMid(char *b, size_t n)   { txtCal(Z_MID, b, n); }
-static void txtCalFar(char *b, size_t n)   { txtCal(Z_FAR, b, n); }
-
-static ApInfo aps[20];
-static int apCount = 0, apIdx = 0;
-static uint32_t apScanMs = 0;
-static char routerBtn[8] = "Scan";
-static void drawSettingsFull();
-static void footerMsg(const char *m);
-
-static void actRouter() {
-  if (apCount == 0 || millis() - apScanMs > 60000) {
-    footerMsg("Scanning WiFi...");
-    apCount = csiScan(aps, 20);
-    apScanMs = millis();
-    apIdx = 0;
-  } else {
-    apIdx = (apIdx + 1) % apCount;
-  }
-  if (apCount > 0) {
-    ApInfo &a = aps[apIdx];
-    bool changed = memcmp(g.bssid, a.bssid, 6) != 0;
-    memcpy(g.bssid, a.bssid, 6);
-    g.channel = a.channel;
-    strcpy(g.ssid, a.ssid);
-    if (changed) { g.hasBaseline = false; for (int i = 0; i < 4; i++) g.calScore[i] = -1; }
-    if (g.distOn) csiBegin(g.bssid, g.channel);
-    strcpy(routerBtn, "Next");
-    char m[48];
-    snprintf(m, sizeof(m), "%d/%d  %d dBm", apIdx + 1, apCount, a.rssi);
-    footerMsg(m);
-  } else {
-    footerMsg("No WiFi found");
-  }
-}
-static void onDistToggle() {
-  if (g.distOn && g.channel > 0) csiBegin(g.bssid, g.channel);
-  else if (!g.distOn) csiStop();
-}
-static void actCalEmpty() { csiStartCal(Z_EMPTY); }
-static void actCalNear()  { csiStartCal(Z_NEAR); }
-static void actCalMid()   { csiStartCal(Z_MID); }
-static void actCalFar()   { csiStartCal(Z_FAR); }
-static void actResetStars() { g.stars = 0; starProgress = 0; settingsSave(); footerMsg("Stars reset"); }
-static void actChangePin()  { enterPin(PIN_SET); }
-static void actTestChime()  { audioChime(); }
-static void onGain()        { audioSetGain(g.micGain); }
-static void onBright()      { applyBrightness(); }
-static void applyVad() {
-  audioSetVad(0.80f - 0.05f * g.vadSens, g.noiseMargin);
-  if (g.hisVoiceOnly && g.pitchHi > g.pitchLo) audioSetPitchBand(g.pitchLo, g.pitchHi);
-  else audioSetPitchBand(0, 0);
-}
-
-static void txtVoice(char *b, size_t n) {
-  if (audioSpeechActive()) snprintf(b, n, "VOICE  %.0f Hz  score %.2f", audioPitchHz(), audioVoicing());
-  else                     snprintf(b, n, "-----        score %.2f", audioVoicing());
-}
-static void txtVoiceSetup(char *b, size_t n) {
-  if (g.pitchHi <= 0) snprintf(b, n, "not done");
-  else snprintf(b, n, "%d-%d Hz", g.pitchLo, g.pitchHi);
-}
-static void enterVoiceSetup();
-static void actVoiceSetup() { enterVoiceSetup(); }
-static void txtNoise(char *b, size_t n) {
-  snprintf(b, n, "room %.0f dB   now %.0f dB", audioNoiseDbfs() + g.calOffset, audioLevelDbfs() + g.calOffset);
-}
-
-#define V(lbl, ptr, mn, mx, st, unit, cb) {R_VALUE, lbl, ptr, mn, mx, st, unit, nullptr, nullptr, nullptr, nullptr, cb}
-#define T(lbl, ptr, cb)                   {R_TOGGLE, lbl, nullptr, 0, 0, 0, nullptr, ptr, nullptr, nullptr, nullptr, cb}
-#define A(lbl, fn, btn, txt)              {R_ACTION, lbl, nullptr, 0, 0, 0, nullptr, nullptr, fn, btn, txt, nullptr}
-#define RO(lbl, txt)                      {R_READOUT, lbl, nullptr, 0, 0, 0, nullptr, nullptr, nullptr, nullptr, txt, nullptr}
-
-static Row pageSound[] = {
-  RO("Level", txtLevel),
-  V("Loud limit",  &g.loudDb,     40, 100, 1, "dB", nullptr),
-  V("Warn margin", &g.warnMargin,  2,  15, 1, "dB", nullptr),
-  V("Mic gain",    &g.micGain,     0,  42, 6, "dB", onGain),
-  V("Mic cal",     &g.calOffset,  60, 140, 1, "dB", nullptr),
-};
-static Row pageDist[] = {
-  T("Distance adjust", &g.distOn, onDistToggle),
-  A("Router", actRouter, routerBtn, txtRouter),
-  RO("Live", txtDistLive),
-  V("Mid-room adj", &g.midOffset, -24, 0, 1, "dB", nullptr),
-  V("Far adj",      &g.farOffset, -30, 0, 1, "dB", nullptr),
-};
-static Row pageCal[] = {
-  A("Empty room", actCalEmpty, "Record", txtCalEmpty),
-  A("Near (0.5m)", actCalNear, "Record", txtCalNear),
-  A("Mid (1.5m)",  actCalMid,  "Record", txtCalMid),
-  A("Far (3m)",    actCalFar,  "Record", txtCalFar),
-  RO("Live", txtCalLive),
-};
-static Row pageReward[] = {
-  V("Star every", &g.starEvery, 15, 300, 5, "s", nullptr),
-  V("Daily goal", &g.dailyGoal,  3,  30, 1, "",  nullptr),
-  T("Loud resets bar", &g.loudResets, nullptr),
-  T("Chime sound",     &g.chime,      nullptr),
-  T("Talk bubbles",    &g.bubbles,    nullptr),
-  A("Stars", actResetStars, "Reset", nullptr),
-};
-static Row pageSys[] = {
-  V("Voice floor", &g.floorDb,    20, 80, 1, "dB", nullptr),
-  V("Brightness",  &g.brightness, 10, 100, 10, "%", onBright),
-  T("LED glow",    &g.ledGlow, nullptr),
-  V("Nap after",   &g.sleepAfter, 30, 900, 30, "s", nullptr),
-  A("PIN", actChangePin, "Change", nullptr),
-  V("Noise margin", &g.noiseMargin, 2, 20, 1, "dB", applyVad),
-};
-
-static Row pageMic[] = {
-  RO("Voice", txtVoice),
-  RO("Noise", txtNoise),
-  A("Voice setup", actVoiceSetup, "Start", txtVoiceSetup),
-  T("Only his voice", &g.hisVoiceOnly, applyVad),
-  T("Speech only",    &g.speechOnly, nullptr),
-  V("Speech sens",    &g.vadSens, 1, 10, 1, "", applyVad),
-};
-
-struct Page { const char *name; Row *rows; int n; };
-static Page pages[] = {
-  {"SOUND",  pageSound,  5},
-  {"MIC",    pageMic,    6},
-  {"DIST",   pageDist,   5},
-  {"CALIB",  pageCal,    5},
-  {"STARS",  pageReward, 6},
-  {"SYS",    pageSys,    6},
-};
-#define PAGE_MIC 1
-#define NPAGES 6
-#define TAB_W  (320 / NPAGES)
-#define PAGE_CALIB 3
-static int curPage = 0;
-static char footerText[48] = "";
-static uint32_t footerMs = 0;
-
-#define ROW_Y(i) (32 + (i) * 30)   // up to 6 rows per page
-#define ROW_H 28
-#define BTN_MINUS_X 196
-#define BTN_PLUS_X 262
-#define BTN_W 54
-#define BTN_H 24
-
-static void drawButton(int x, int y, int w, int h, const char *label, uint16_t bg, uint16_t fg) {
+void drawButton(int x, int y, int w, int h, const char *label, uint16_t bg, uint16_t fg) {
   tft.fillRoundRect(x, y, w, h, 6, bg);
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(fg, bg);
   tft.drawString(label, x + w / 2, y + h / 2 + 1, 2);
 }
 
-static void drawRowValue(int i) {
-  Row &r = pages[curPage].rows[i];
-  int y = ROW_Y(i), my = y + ROW_H / 2;
-  char b[48] = "";
-  tft.setTextColor(C_TEXT, C_SCREEN);
-  switch (r.type) {
-    case R_VALUE:
-      snprintf(b, sizeof(b), "%d %s", *r.val, r.unit);
-      tft.fillRect(120, y, 74, ROW_H, C_SCREEN);
-      tft.setTextDatum(MR_DATUM);
-      tft.drawString(b, 192, my, 2);
-      break;
-    case R_TOGGLE:
-      drawButton(230, y + 2, 84, BTN_H, *r.flag ? "ON" : "OFF", *r.flag ? C_ON : C_OFF, C_BTN_TX);
-      break;
-    case R_ACTION:
-      if (r.text) {
-        r.text(b, sizeof(b));
-        tft.fillRect(100, y, 108, ROW_H, C_SCREEN);
-        tft.setTextDatum(MR_DATUM);
-        tft.drawString(b, 206, my, 2);
-      }
-      break;
-    case R_READOUT:
-      r.text(b, sizeof(b));
-      tft.fillRect(60, y, 258, ROW_H, C_SCREEN);
-      tft.setTextDatum(ML_DATUM);
-      tft.drawString(b, 62, my, 2);
-      break;
+// Serial 'P': dump the panel's frame memory as raw RGB565 (tools/screenshot.py turns it into a PNG)
+static void screenshot() {
+  static uint16_t row[320];
+  Serial.printf("\nSHOT %d %d\n", tft.width(), tft.height());
+  for (int y = 0; y < tft.height(); y++) {
+    tft.readRect(0, y, tft.width(), 1, row);
+    Serial.write((const uint8_t *)row, tft.width() * 2);
   }
-}
-
-static void drawRow(int i) {
-  Row &r = pages[curPage].rows[i];
-  int y = ROW_Y(i), my = y + ROW_H / 2;
-  tft.fillRect(0, y, 320, ROW_H, C_SCREEN);
-  tft.setTextDatum(ML_DATUM);
-  tft.setTextColor(r.type == R_READOUT ? C_DIM : C_TEXT, C_SCREEN);
-  tft.drawString(r.label, 6, my, 2);
-  if (r.type == R_VALUE) {
-    drawButton(BTN_MINUS_X, y + 2, BTN_W, BTN_H, "-", C_BTN, C_BTN_TX);
-    drawButton(BTN_PLUS_X, y + 2, BTN_W, BTN_H, "+", C_BTN, C_BTN_TX);
-  } else if (r.type == R_ACTION) {
-    drawButton(214, y + 2, 100, BTN_H, r.btn, C_BTN, C_BTN_TX);
-  }
-  tft.drawFastHLine(4, y + ROW_H + 1, 312, C_PANEL);
-  drawRowValue(i);
-}
-
-static void drawFooter() {
-  tft.fillRect(0, 212, 236, 28, C_SCREEN);
-  tft.setTextDatum(ML_DATUM);
-  tft.setTextColor(C_TEXT, C_SCREEN);
-  // calibration gets a big countdown so it's readable from across the room
-  if (csiCalBusy()) {
-    int s = csiCalSecondsLeft();
-    char b[32];
-    if (s > 0) snprintf(b, sizeof(b), "Step away %d", s);
-    else       snprintf(b, sizeof(b), "Recording %d", -s);
-    tft.drawString(b, 6, 226, 4);
-    return;
-  }
-  if (footerText[0] && millis() - footerMs < 4000) tft.drawString(footerText, 6, 226, 2);
-  else if (curPage == PAGE_CALIB) {
-    tft.setTextColor(C_DIM, C_SCREEN);
-    tft.drawString("Empty first, then Near/Mid/Far", 6, 226, 2);
-  }
-}
-
-static void footerMsg(const char *m) {
-  strncpy(footerText, m, sizeof(footerText) - 1);
-  footerMs = millis();
-  if (screen == SCR_SETTINGS) drawFooter();
-}
-
-static void drawTabs() {
-  for (int i = 0; i < NPAGES; i++) {
-    int x = i * TAB_W;
-    bool on = i == curPage;
-    tft.fillRect(x, 0, TAB_W, 28, on ? C_TAB : C_PANEL);
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextColor(on ? C_BTN_TX : C_TEXT, on ? C_TAB : C_PANEL);
-    tft.drawString(pages[i].name, x + TAB_W / 2, 14, 2);
-  }
-}
-
-static void drawSettingsFull() {
-  tft.fillScreen(C_SCREEN);
-  drawTabs();
-  for (int i = 0; i < pages[curPage].n; i++) drawRow(i);
-  drawButton(240, 212, 76, 26, "DONE", C_ON, C_BTN_TX);
-  drawFooter();
-}
-
-static void enterSettings(int tab) {
-  screen = SCR_SETTINGS;
-  curPage = tab;
-  drawSettingsFull();
-}
-
-// returns true if the tap was a +/- (eligible for auto-repeat)
-static bool settingsTap(int tx, int ty) {
-  if (ty < 28) {
-    int p = tx / TAB_W;
-    if (p >= 0 && p < NPAGES && p != curPage) { curPage = p; drawSettingsFull(); }
-    return false;
-  }
-  if (ty >= 210 && tx >= 236) {
-    settingsSave();
-    enterChild();
-    return false;
-  }
-  for (int i = 0; i < pages[curPage].n; i++) {
-    int y = ROW_Y(i);
-    if (ty < y || ty >= y + ROW_H) continue;
-    Row &r = pages[curPage].rows[i];
-    switch (r.type) {
-      case R_VALUE:
-        if (tx >= BTN_MINUS_X && tx < BTN_MINUS_X + BTN_W) *r.val = max(r.mn, *r.val - r.step);
-        else if (tx >= BTN_PLUS_X && tx < BTN_PLUS_X + BTN_W) *r.val = min(r.mx, *r.val + r.step);
-        else return false;
-        if (r.onChange) r.onChange();
-        drawRowValue(i);
-        return true;
-      case R_TOGGLE:
-        if (tx < 230) return false;
-        *r.flag = !*r.flag;
-        if (r.onChange) r.onChange();
-        drawRowValue(i);
-        return false;
-      case R_ACTION:
-        if (tx < 214) return false;
-        r.act();
-        if (screen == SCR_SETTINGS) drawRow(i);
-        return false;
-      default:
-        return false;
-    }
-  }
-  return false;
-}
-
-static void settingsRefresh() {
-  for (int i = 0; i < pages[curPage].n; i++) {
-    Row &r = pages[curPage].rows[i];
-    if (r.text) drawRowValue(i);
-  }
-  drawFooter();
-}
-
-// ======================================================================
-//  Voice setup wizard: learns his inside voice, excited voice and pitch range
-// ======================================================================
-#define VS_NEED     100     // voiced samples (~4 s of voice at 25 Hz)
-#define VS_MIN      30      // accept a short take at timeout
-#define VS_TIMEOUT  30000
-enum VsStep { VS_INSIDE_INTRO, VS_INSIDE_REC, VS_EXCITED_INTRO, VS_EXCITED_REC, VS_RESULT };
-static VsStep vsStep;
-static float vsLvl[2][VS_NEED], vsPitch[2][VS_NEED * 2];
-static int vsN[2], vsPN;
-static uint32_t vsRecStart, vsLastSample;
-static int vsNewLoud, vsNewFloor, vsNewLo, vsNewHi, vsInside, vsExcited;
-static const char *vsNote = nullptr;
-
-static void vsButton(int x, const char *label, uint16_t bg) { drawButton(x, 198, 100, 36, label, bg, C_BTN_TX); }
-
-static void vsLines(const char *title, const char *l1, const char *l2, const char *l3) {
-  tft.fillScreen(C_SCREEN);
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(C_TEXT, C_SCREEN);
-  tft.drawString(title, 160, 28, 4);
-  tft.drawString(l1, 160, 70, 2);
-  tft.drawString(l2, 160, 92, 2);
-  tft.setTextColor(C_DIM, C_SCREEN);
-  tft.drawString(l3, 160, 114, 2);
-  if (vsNote) { tft.setTextColor(C_LOUD, C_SCREEN); tft.drawString(vsNote, 160, 140, 2); vsNote = nullptr; }
-}
-
-static float vsMedian(float *v, int n) {
-  for (int i = 1; i < n; i++) { float k = v[i]; int j = i - 1; while (j >= 0 && v[j] > k) { v[j + 1] = v[j]; j--; } v[j + 1] = k; }
-  return n ? v[n / 2] : 0;
-}
-
-static void vsDraw() {
-  switch (vsStep) {
-    case VS_INSIDE_INTRO:
-      vsLines("Step 1: inside voice", "Ask him to talk normally, like", "telling you about his day.",
-              "Device about 1 m away, room quiet.");
-      vsButton(10, "Cancel", C_OFF);
-      vsButton(210, "Start", C_ON);
-      break;
-    case VS_EXCITED_INTRO:
-      vsLines("Step 2: excited voice", "Now his excited voice, like", "cheering for a favorite pup.",
-              "Skip if he isn't up for it.");
-      vsButton(10, "Skip", C_OFF);
-      vsButton(210, "Start", C_ON);
-      break;
-    case VS_INSIDE_REC:
-    case VS_EXCITED_REC:
-      vsLines(vsStep == VS_INSIDE_REC ? "Listening: inside voice" : "Listening: excited voice",
-              "Keep talking...", "", "");
-      tft.drawRoundRect(40, 150, 240, 18, 9, C_DIM);
-      vsButton(10, "Cancel", C_OFF);
-      break;
-    case VS_RESULT: {
-      char a[48], b[48], c[48];
-      if (vsExcited) snprintf(a, sizeof(a), "Inside %d dB   Excited %d dB", vsInside, vsExcited);
-      else           snprintf(a, sizeof(a), "Inside voice %d dB", vsInside);
-      snprintf(b, sizeof(b), "New loud limit: %d dB", vsNewLoud);
-      snprintf(c, sizeof(c), "Listens for voices %d-%d Hz", vsNewLo, vsNewHi);
-      vsLines("Voice learned", a, b, c);
-      vsButton(10, "Redo", C_OFF);
-      vsButton(210, "Save", C_ON);
-      break;
-    }
-  }
-}
-
-static void vsFinish() {
-  int nIn = vsN[0], nEx = vsN[1];
-  vsInside  = (int)lroundf(vsMedian(vsLvl[0], nIn));
-  vsExcited = nEx ? (int)lroundf(vsMedian(vsLvl[1], nEx)) : 0;
-  // limit sits between his two voices; with no excited sample, 8 dB over the inside voice
-  vsNewLoud  = constrain(vsExcited > vsInside + 4 ? (vsInside + vsExcited) / 2 : vsInside + 8, 40, 100);
-  vsNewFloor = constrain(vsInside - 15, 20, 80);
-  // pitch band: 10th..90th percentile, widened (excited shrieks go much higher)
-  vsMedian(vsPitch[0], vsPN);   // sorts
-  float p10 = vsPitch[0][vsPN / 10], p90 = vsPitch[0][vsPN * 9 / 10];
-  vsNewLo = constrain((int)(p10 * 0.7f), 60, 1000);
-  vsNewHi = constrain((int)(p90 * 1.8f), vsNewLo + 50, 2600);
-  vsStep = VS_RESULT;
-  Serial.printf("[voice-setup] inside %d excited %d -> limit %d floor %d, pitch %d-%d Hz (%d samples)\n",
-                vsInside, vsExcited, vsNewLoud, vsNewFloor, vsNewLo, vsNewHi, vsPN);
-}
-
-static void vsStartRec(VsStep s) {
-  vsStep = s;
-  vsN[s == VS_EXCITED_REC] = 0;
-  vsRecStart = millis();
-  vsDraw();
-}
-
-static void enterVoiceSetup() {
-  screen = SCR_VOICESETUP;
-  audioSetPitchBand(0, 0);   // hear every voice while learning his
-  vsPN = 0; vsN[0] = vsN[1] = 0;
-  vsStep = VS_INSIDE_INTRO;
-  vsDraw();
-}
-
-static void vsExit(bool save) {
-  if (save) {
-    g.loudDb = vsNewLoud;
-    g.floorDb = vsNewFloor;
-    g.pitchLo = vsNewLo;
-    g.pitchHi = vsNewHi;
-    g.insideDb = vsInside;
-    g.excitedDb = vsExcited;
-    g.hisVoiceOnly = true;
-    settingsSave();
-  }
-  applyVad();
-  enterSettings(PAGE_MIC);
-}
-
-static void vsTap(int tx, int ty) {
-  bool left = ty >= 190 && tx < 120, right = ty >= 190 && tx >= 200;
-  switch (vsStep) {
-    case VS_INSIDE_INTRO:  if (left) vsExit(false); else if (right) vsStartRec(VS_INSIDE_REC); break;
-    case VS_EXCITED_INTRO: if (left) vsFinish(), vsDraw(); else if (right) vsStartRec(VS_EXCITED_REC); break;
-    case VS_INSIDE_REC:
-    case VS_EXCITED_REC:   if (left) vsExit(false); break;
-    case VS_RESULT:        if (left) enterVoiceSetup(); else if (right) vsExit(true); break;
-  }
-}
-
-static void vsTick() {
-  if (vsStep != VS_INSIDE_REC && vsStep != VS_EXCITED_REC) return;
-  uint32_t now = millis();
-  if (now - vsLastSample < 40) return;
-  vsLastSample = now;
-  int k = vsStep == VS_EXCITED_REC;
-
-  if (audioSpeechActive() && vsN[k] < VS_NEED) {
-    vsLvl[k][vsN[k]++] = audioLevelDbfs() + g.calOffset;
-    if (vsPN < VS_NEED * 2 && audioPitchHz() > 0) vsPitch[0][vsPN++] = audioPitchHz();
-  }
-
-  // progress bar + live pitch
-  int w = 236 * vsN[k] / VS_NEED;
-  if (w > 0) tft.fillRoundRect(42, 152, w, 14, 7, C_GOOD);
-  char b[32];
-  snprintf(b, sizeof(b), audioSpeechActive() ? "  hearing voice  %.0f Hz  " : "      waiting for voice      ", audioPitchHz());
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(C_TEXT, C_SCREEN);
-  tft.drawString(b, 160, 184, 2);
-
-  bool done = vsN[k] >= VS_NEED;
-  bool timeout = now - vsRecStart > VS_TIMEOUT;
-  if (done || (timeout && vsN[k] >= VS_MIN)) {
-    if (k == 0) vsStep = VS_EXCITED_INTRO; else vsFinish();
-    vsDraw();
-  } else if (timeout) {
-    vsNote = "Didn't hear enough voice. Try again.";
-    vsStep = k == 0 ? VS_INSIDE_INTRO : VS_EXCITED_INTRO;
-    vsDraw();
-  }
+  Serial.print("\nEND\n");
 }
 
 // ======================================================================
@@ -984,18 +535,30 @@ void setup() {
     delay(3000);
   }
 
-  if (g.distOn && g.channel > 0) csiBegin(g.bssid, g.channel);
-  enterChild();
+  csiModelLoad();
+  if (netHasCreds()) netBegin();          // joins in the background; loop() starts CSI once connected
+  if (!g.setupDone) wizardEnter(WIZ_FULL);
+  else enterChild();
+}
+
+// Keep CSI capture tied to the WiFi connection (the router can drop and come back)
+static void serviceNet() {
+  static uint32_t last = 0;
+  if (millis() - last < 1000) return;
+  last = millis();
+  bool conn = netConnected();
+  if (conn && !csiRunning()) csiStart();
+  else if (!conn && csiRunning()) csiStop();
 }
 
 void loop() {
   static uint32_t lastFrame = millis();
   static bool wasDown = false;
-  static uint32_t downMs = 0, lastRepeat = 0, lastRefresh = 0, lastLog = 0;
+  static uint32_t downMs = 0, lastRepeat = 0, lastLog = 0;
   static bool repeatable = false;
   static int downX = 0, downY = 0, lastX = 0, lastY = 0;
 
-  csiTick();
+  if (screen != SCR_WIZARD) serviceNet();   // the wizard manages WiFi itself
 
   int tx, ty;
   bool down = touchRead(tx, ty);
@@ -1048,17 +611,13 @@ void loop() {
         settingsTap(downX, downY);
         lastRepeat = now;
       }
-      if (now - lastRefresh > 250) { lastRefresh = now; settingsRefresh(); }
-      if (csiCalBusy()) setPixel(csiCalSecondsLeft() > 0 ? 30 : 0, csiCalSecondsLeft() > 0 ? 18 : 0,
-                                 csiCalSecondsLeft() > 0 ? 0 : 30);
-      else setPixel(0, 0, 0);
+      if (screen == SCR_SETTINGS) settingsTick();
       lastFrame = now;
       break;
 
-    case SCR_VOICESETUP:
-      if (pressed) vsTap(tx, ty);
-      if (screen == SCR_VOICESETUP) vsTick();
-      setPixel(0, audioSpeechActive() ? 30 : 0, 0);   // green while it hears voice
+    case SCR_WIZARD:
+      if (pressed) wizardTap(tx, ty);
+      if (screen == SCR_WIZARD) wizardTick();
       lastFrame = now;
       break;
   }
@@ -1071,17 +630,44 @@ void loop() {
       for (int a = 1; a < 127; a++) { Wire.beginTransmission(a); if (Wire.endTransmission() == 0) Serial.printf(" %02X", a); }
       Serial.println();
       audioDump();
+    } else if (c == 'S') {
+      // S<view><mood>: force a view + mood for screenshots, e.g. "S03" = pup, too loud
+      int v = Serial.read() - '0', m = Serial.read() - '0';
+      if (v >= 0 && v < NVIEWS && m >= 0 && m <= M_CELEBRATE) {
+        if (screen != SCR_CHILD) enterChild();
+        if (v != g.view) { g.view = v; tft.fillRect(0, 30, 320, 210, C_SCREEN); }
+        demoMood = m;
+        static const char *const demoSay[] = {nullptr, "Nice and quiet", "A little quieter?", "That's too loud!",
+                                              nullptr, "Super star!", "You did it!"};
+        bubble = g.bubbles ? demoSay[m] : nullptr;
+        bubbleLeft = 1e6f;
+        Serial.printf("[demo] view %d mood %d\n", v, m);
+      }
+    } else if (c == 'X') {
+      demoMood = -1;
+      bubble = nullptr;
+      Serial.println("[demo] off");
+    } else if (c == 'P') {
+      screenshot();
+    } else if (c == 'W') {
+      // W<mode>: open a setup screen (0 full, 1 voice, 2 zones, 3 wifi, 4 grown-up, 5 zone check)
+      int m = Serial.read() - '0';
+      if (m >= WIZ_FULL && m <= WIZ_CHECK) { demoMood = -1; wizardEnter((WizardMode)m); }
+    } else if (c == 'T') {
+      // T<tab>: open a settings tab (0 Voice, 1 Room, 2 Stars, 3 Screen, 4 Setup)
+      int t = Serial.read() - '0';
+      if (t >= 0 && t < NTABS) { demoMood = -1; settingsEnter(t); }
     }
   }
 
   if (now - lastLog > 1000) {
     lastLog = now;
-    extern volatile int16_t g_rawMinL, g_rawMaxL, g_rawMinR, g_rawMaxR;
-    Serial.printf("[raw] L %d..%d  R %d..%d\n", g_rawMinL, g_rawMaxL, g_rawMinR, g_rawMaxR);
-    Serial.printf("[lvl] %.1f dBFS (%.0f dB)  speech %.0f dB %s pitch %.2f  noise %.0f dB  mood %d  zone %s  csi %.3f/%dpps  stars %d prog %.0f/%d\n",
-                  audioLevelDbfs(), audioLevelDbfs() + g.calOffset, audioSpeechDbfs() + g.calOffset,
-                  audioSpeechActive() ? "VOICE" : "-", audioVoicing(), audioNoiseDbfs() + g.calOffset,
-                  (int)mood, zoneName(csiZone()), csiScore(), csiPps(), g.stars, starProgress, g.starEvery);
+    Serial.printf("[lvl] %.0f dB  speech %.0f dB %s %.0fHz (%.2f)  noise %.0f dB  line %.0f  mood %d  "
+                  "zone %s %.0f%% (live %s)  %dpps motion %.2f  stars %d prog %.0f/%d  heap %u psram %u\n",
+                  audioLevelDbfs() + g.calOffset, audioSpeechDbfs() + g.calOffset,
+                  audioSpeechActive() ? "VOICE" : "-", audioPitchHz(), audioVoicing(), audioNoiseDbfs() + g.calOffset,
+                  limitNow(), (int)mood, zoneName(csiZone()), csiConfidence() * 100, zoneName(csiLiveZone()),
+                  csiPps(), csiMotion(), g.stars, starProgress, g.starEvery, ESP.getFreeHeap(), ESP.getFreePsram());
   }
   delay(2);
 }
