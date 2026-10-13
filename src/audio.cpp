@@ -1,7 +1,9 @@
 #include "audio.h"
 #include "config.h"
 #include <Wire.h>
-#include <driver/i2s.h>
+#include <ESP_I2S.h>
+
+static I2SClass s_i2s;   // full duplex, 16 kHz stereo frames (mono codec)
 #include <math.h>
 
 static volatile float s_levelDb = -90.f;
@@ -207,8 +209,8 @@ static void audioTask(void *) {
   int ampOffAt = -1;   // blocks until amp off
 
   for (;;) {
-    size_t got = 0;
-    if (i2s_read(I2S_NUM_0, rx, sizeof(rx), &got, portMAX_DELAY) != ESP_OK || got == 0) continue;
+    size_t got = s_i2s.readBytes((char *)rx, sizeof(rx));
+    if (got == 0) { vTaskDelay(1); continue; }
     int n = got / 4;
     double sL = 0, sR = 0;
     int16_t mnL = 32767, mxL = -32768, mnR = 32767, mxR = -32768;
@@ -279,8 +281,7 @@ static void audioTask(void *) {
         tx[2 * i] = s; tx[2 * i + 1] = s;
         chimePos++;
       }
-      size_t w;
-      i2s_write(I2S_NUM_0, tx, sizeof(tx), &w, pdMS_TO_TICKS(30));
+      s_i2s.write((const uint8_t *)tx, sizeof(tx));
       if (chimePos >= CHIME_LEN) { chimePos = -1; ampOffAt = 8; }
     } else if (ampOffAt >= 0) {
       if (--ampOffAt < 0) digitalWrite(AMP_EN_PIN, !AMP_ON_LEVEL);
@@ -292,28 +293,9 @@ bool audioBegin(int micGainDb) {
   pinMode(AMP_EN_PIN, OUTPUT);
   digitalWrite(AMP_EN_PIN, !AMP_ON_LEVEL);
 
-  i2s_config_t cfg = {};
-  cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_TX);
-  cfg.sample_rate = AUDIO_RATE;
-  cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
-  cfg.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
-  cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
-  cfg.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
-  cfg.dma_buf_count = 6;
-  cfg.dma_buf_len = AUDIO_FRAMES;
-  cfg.use_apll = false;
-  cfg.tx_desc_auto_clear = true;
-  cfg.mclk_multiple = I2S_MCLK_MULTIPLE_256;   // 4.096 MHz MCLK
-
-  i2s_pin_config_t pins = {};
-  pins.mck_io_num = I2S_MCLK_PIN;
-  pins.bck_io_num = I2S_BCLK_PIN;
-  pins.ws_io_num = I2S_LRCK_PIN;
-  pins.data_out_num = I2S_DOUT_PIN;
-  pins.data_in_num = I2S_DIN_PIN;
-
-  if (i2s_driver_install(I2S_NUM_0, &cfg, 0, nullptr) != ESP_OK) return false;
-  if (i2s_set_pin(I2S_NUM_0, &pins) != ESP_OK) return false;
+  // ESP_I2S std mode: MCLK = 256 x fs = 4.096 MHz, which the ES8311 setup below expects
+  s_i2s.setPins(I2S_BCLK_PIN, I2S_LRCK_PIN, I2S_DOUT_PIN, I2S_DIN_PIN, I2S_MCLK_PIN);
+  if (!s_i2s.begin(I2S_MODE_STD, AUDIO_RATE, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO)) return false;
   delay(10);   // MCLK running before codec setup
 
   s_codecOk = es8311Init(micGainDb);

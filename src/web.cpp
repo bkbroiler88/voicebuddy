@@ -517,7 +517,7 @@ static esp_err_t hOta(httpd_req_t *r) {
 
   mbedtls_sha256_context sha;
   mbedtls_sha256_init(&sha);
-  mbedtls_sha256_starts_ret(&sha, 0);
+  mbedtls_sha256_starts(&sha, 0);
   uint8_t trailer[SIG_TRAILER];
   const int BUF = 4096;
   uint8_t *buf = (uint8_t *)malloc(BUF);
@@ -530,7 +530,7 @@ static esp_err_t hOta(httpd_req_t *r) {
     // split this chunk into image bytes and trailer bytes
     int img = max(0, min(n, imageLen - got));
     if (img > 0) {
-      mbedtls_sha256_update_ret(&sha, buf, img);
+      mbedtls_sha256_update(&sha, buf, img);
       if (esp_ota_write(h, buf, img) != ESP_OK) { ok = false; break; }
     }
     for (int i = img; i < n; i++) trailer[got + i - imageLen] = buf[i];
@@ -538,7 +538,7 @@ static esp_err_t hOta(httpd_req_t *r) {
   }
   free(buf);
   uint8_t hash[32];
-  mbedtls_sha256_finish_ret(&sha, hash);
+  mbedtls_sha256_finish(&sha, hash);
   mbedtls_sha256_free(&sha);
   if (!ok) { esp_ota_abort(h); return sendErr(r, "400 Bad Request", "write_failed"); }
 
@@ -570,8 +570,8 @@ static esp_err_t hOta(httpd_req_t *r) {
 static bool start() {
   if (!certEnsure()) { Serial.println("[web] no certificate, not starting"); return false; }
   httpd_ssl_config_t conf = HTTPD_SSL_CONFIG_DEFAULT();
-  conf.cacert_pem = (const uint8_t *)certPem();         // IDF 4.4: "cacert" is the server's own cert
-  conf.cacert_len = strlen(certPem()) + 1;
+  conf.servercert = (const uint8_t *)certPem();
+  conf.servercert_len = strlen(certPem()) + 1;
   conf.prvtkey_pem = (const uint8_t *)keyPem();
   conf.prvtkey_len = strlen(keyPem()) + 1;
   conf.transport_mode = HTTPD_SSL_TRANSPORT_SECURE;     // no plain HTTP at all

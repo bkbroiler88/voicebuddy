@@ -50,7 +50,7 @@ static void computeFingerprint() {
   mbedtls_x509_crt_init(&crt);
   if (mbedtls_x509_crt_parse(&crt, (const unsigned char *)s_cert, strlen(s_cert) + 1) == 0) {
     unsigned char h[32];
-    mbedtls_sha256_ret(crt.raw.p, crt.raw.len, h, 0);
+    mbedtls_sha256(crt.raw.p, crt.raw.len, h, 0);
     char *p = s_fp;
     for (int i = 0; i < 32; i++) p += sprintf(p, i ? ":%02X" : "%02X", h[i]);
     snprintf(s_fpShort, sizeof(s_fpShort), "%02X:%02X:%02X", h[29], h[30], h[31]);
@@ -66,10 +66,8 @@ static bool generate() {
   bool ok = false;
   mbedtls_pk_context key;
   mbedtls_x509write_cert crt;
-  mbedtls_mpi serial;
   mbedtls_pk_init(&key);
   mbedtls_x509write_crt_init(&crt);
-  mbedtls_mpi_init(&serial);
   const size_t BUF = 2048;
   unsigned char *certBuf = (unsigned char *)ps_calloc(1, BUF), *keyBuf = (unsigned char *)ps_calloc(1, BUF);
   unsigned char ser[16];
@@ -81,7 +79,6 @@ static bool generate() {
 
     esp_fill_random(ser, sizeof(ser));
     ser[0] &= 0x7F;                                  // positive serial
-    if (mbedtls_mpi_read_binary(&serial, ser, sizeof(ser))) break;
 
     mbedtls_x509write_crt_set_version(&crt, MBEDTLS_X509_CRT_VERSION_3);
     mbedtls_x509write_crt_set_md_alg(&crt, MBEDTLS_MD_SHA256);
@@ -89,7 +86,7 @@ static bool generate() {
     mbedtls_x509write_crt_set_issuer_key(&crt, &key);
     if (mbedtls_x509write_crt_set_subject_name(&crt, "CN=voicebuddy.local,O=Voice Buddy")) break;
     if (mbedtls_x509write_crt_set_issuer_name(&crt, "CN=voicebuddy.local,O=Voice Buddy")) break;
-    if (mbedtls_x509write_crt_set_serial(&crt, &serial)) break;
+    if (mbedtls_x509write_crt_set_serial_raw(&crt, ser, sizeof(ser))) break;
     if (mbedtls_x509write_crt_set_validity(&crt, "20240101000000", "20491231235959")) break;
     mbedtls_x509write_crt_set_basic_constraints(&crt, 0, -1);
 
@@ -99,7 +96,6 @@ static bool generate() {
     ok = true;
   } while (0);
 
-  mbedtls_mpi_free(&serial);
   mbedtls_x509write_crt_free(&crt);
   mbedtls_pk_free(&key);
   if (keyBuf) { memset(keyBuf, 0, BUF); free(keyBuf); }
