@@ -1,0 +1,12 @@
+# Voice Buddy, 16 MB flash, with the ESP-SR speech-model partition.
+# app0/app1 are the two firmware slots for signed updates; "spiffs" holds LittleFS
+# (certificate, sessions, history); "model" is Espressif's speech models (srmodels.bin,
+# flashed at 0xC10000 by tools/sr_model.py, not part of OTA updates).
+# Name,     Type, SubType, Offset,   Size,     Flags
+nvs,        data, nvs,     0x9000,   0x5000,
+otadata,    data, ota,     0xe000,   0x2000,
+app0,       app,  ota_0,   0x10000,  0x340000,
+app1,       app,  ota_1,   0x350000, 0x340000,
+spiffs,     data, spiffs,  0x690000, 0x580000,
+model,      data, spiffs,  0xC10000, 0x3E0000,
+coredump,   data, coredump,0xFF0000, 0x10000,

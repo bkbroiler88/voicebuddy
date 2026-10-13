@@ -86,7 +86,7 @@ python tools/sign_firmware.py   # -> bin/voicebuddy-<version>.signed.bin
 
 Then upload the `.signed.bin` on the web page under Device › Update firmware. The public key in `src/signing_pubkey.h` is compiled into the firmware. If you build your own copy, run `keygen.py --force` to use your own key, then flash once over USB.
 
-Flash layout (16 MB): nvs 20 KB · otadata · app0 6.25 MB · app1 6.25 MB · storage 3.4 MB (certificate, sessions, history) · coredump.
+Flash layout (16 MB): nvs 20 KB · otadata · app0 3.25 MB · app1 3.25 MB · storage 5.5 MB (certificate, sessions, history, content packs) · speech models 3.9 MB · coredump. The speech-model partition holds Espressif's ESP-SR models for the reading games.
 
 ## Flash it
 
@@ -98,13 +98,15 @@ esptool.py --chip esp32s3 write_flash 0x0 bin/voicebuddy-es3c28p.bin
 
 **Start over:** Settings › Setup › Factory reset erases settings, WiFi, voices, zones, history and the web certificate, then restarts into first-time setup.
 
-**From source** ([PlatformIO](https://platformio.org/)):
+**From source** ([PlatformIO](https://platformio.org/) with the [pioarduino](https://github.com/pioarduino/platform-espressif32) core, Arduino 3.x / ESP-IDF 5.5):
 
 ```
 pio run -t erase
-pio run -t upload
-python tools/make_bin.py        # rebuild the 0x0 image
+pio run -t upload               # also flashes the speech models into their partition
+python tools/make_bin.py        # rebuild the 0x0 image (add --full to include the speech models)
 ```
+
+On Windows run `pio` from PowerShell or the PlatformIO terminal, not Git Bash: the pioarduino tool installer refuses MSYS shells.
 
 ## Hardware notes
 
