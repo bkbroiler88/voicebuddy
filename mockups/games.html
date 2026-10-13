@@ -1,0 +1,386 @@
+<meta charset="utf-8">
+<title>Voice Buddy Games</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+/* Layout: device at 2x on the left, voice controls + game notes on the right; stacks on phones. */
+:root {
+  --bg: #eceff4; --fg: #1d2330; --muted: #5b6475; --panel: #ffffff; --line: #d5dae3;
+  --accent: #2f6f8f; --accent-soft: #dcebf2; --bezel: #16181d;
+  --good: #3f9e68; --warn: #c98a12; --loud: #d4633f;
+  --display: "Baloo 2", "Trebuchet MS", system-ui, sans-serif;
+  --body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14171d; --fg: #e5e9f0; --muted: #9aa3b4; --panel: #1d2129; --line: #2d333e;
+    --accent: #7fb8d4; --accent-soft: #1f3440; --bezel: #050608; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14171d; --fg: #e5e9f0; --muted: #9aa3b4; --panel: #1d2129; --line: #2d333e;
+  --accent: #7fb8d4; --accent-soft: #1f3440; --bezel: #050608; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.5; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 48px; }
+h1 { font-family: var(--display); font-weight: 700; font-size: clamp(28px, 4vw, 40px); line-height: 1.1; margin: 0; text-wrap: balance; }
+.lede { color: var(--muted); max-width: 64ch; margin: 8px 0 0; }
+.stage { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 32px; margin-top: 28px; align-items: start; }
+@media (max-width: 900px) { .stage { grid-template-columns: minmax(0, 1fr); } }
+.device { background: var(--bezel); border-radius: 22px; padding: 18px 18px 22px; width: fit-content; max-width: 100%; }
+.screen { width: 640px; max-width: 100%; aspect-ratio: 4 / 3; border-radius: 6px; overflow: hidden; background: #f6f4ee; }
+.screen svg { display: block; width: 100%; height: 100%; }
+.screen [data-act] { cursor: pointer; }
+.device-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; color: #8a919e; font-size: 12px; letter-spacing: .04em; }
+.led { width: 10px; height: 10px; border-radius: 50%; background: #46a06e; box-shadow: 0 0 10px #46a06e; }
+.panel { display: grid; gap: 16px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.card h2 { font-family: var(--display); font-weight: 700; font-size: 18px; margin: 0 0 6px; }
+.card p { margin: 0; color: var(--muted); font-size: 14px; }
+.slider { display: grid; gap: 6px; margin-top: 8px; }
+.slider label { display: flex; justify-content: space-between; font-size: 14px; }
+.slider label b { font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100%; accent-color: var(--accent); }
+.zones { display: flex; height: 8px; border-radius: 4px; overflow: hidden; }
+.zones i { display: block; height: 100%; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+button { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.games { display: grid; gap: 6px; }
+.games button { text-align: left; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; align-items: start; padding: 9px 12px; }
+.games .n { font-family: var(--display); font-weight: 700; color: var(--muted); }
+.games b { display: block; }
+.games span.d { display: block; color: var(--muted); font-size: 13px; }
+.games button[aria-current="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.games button[aria-current="true"] .n { color: var(--accent); }
+.note { font-size: 13px; color: var(--muted); }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Voice Buddy Games</h1>
+    <p class="lede">Clickable mockups of six games. The voice slider stands in for your child's voice: drag it and watch each game react. Tap buttons on the screen itself, or pick a game on the right.</p>
+  </header>
+
+  <div class="stage">
+    <div>
+      <div class="device">
+        <div class="screen" id="screen"></div>
+        <div class="device-foot"><span>ES3C28P · 2.8"</span><span class="led" id="led"></span></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="card">
+        <h2>Pretend voice</h2>
+        <div class="slider">
+          <label for="lvl"><span>Voice level</span><b id="lvlOut">55 dB · inside voice</b></label>
+          <input type="range" id="lvl" min="30" max="85" value="55" step="1">
+          <div class="zones" aria-hidden="true"><i style="flex:15;background:#cfd6de"></i><i style="flex:21;background:#5abe78"></i><i style="flex:6;background:#f0be3c"></i><i style="flex:13;background:#f08264"></i></div>
+          <p class="note">Below 45: quiet · 45–66: inside voice · 66–72: getting loud · over 72: too loud (the line)</p>
+        </div>
+        <div class="slider" id="pitchBox" hidden>
+          <label for="pitch"><span>Voice pitch</span><b id="pitchOut">300 Hz</b></label>
+          <input type="range" id="pitch" min="150" max="600" value="300" step="5">
+        </div>
+        <div class="row">
+          <button type="button" id="auto" aria-pressed="false">Wobble it for me</button>
+          <button type="button" id="menuBtn">Games menu</button>
+        </div>
+      </div>
+      <div class="card" id="about"><h2></h2><p></p></div>
+      <div class="card">
+        <h2>Games</h2>
+        <div class="games" id="list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const INK = "#322e28", DIM = "#8a837b", BG = "#f6f4ee", GOOD = "#5abe78", WARN = "#f0be3c", LOUD = "#f08264", GOLD = "#ffbe28", BTN = "#5a6e8c", SKY = "#1c3552";
+  const F = 'font-family="Atkinson Hyperlegible, system-ui, sans-serif"';
+  const FLOOR = 45, WARN_AT = 66, LINE = 72;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const t = (x, y, s, size = 13, c = INK, a = "middle", w = 400) => `<text x="${x}" y="${y}" ${F} font-size="${size}" font-weight="${w}" fill="${c}" text-anchor="${a}">${esc(s)}</text>`;
+  const btn = (x, y, w, h, label, c, act, size = 12) => `<g data-act="${act}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="7" fill="${c}"/>${t(x + w / 2, y + h / 2 + 4, label, size, "#fff", "middle", 700)}</g>`;
+  const star = (cx, cy, r, c = GOLD) => { let p = []; for (let i = 0; i < 10; i++) { const rr = i % 2 ? r * .45 : r, a = (-90 + i * 36) * Math.PI / 180; p.push(`${(cx + rr * Math.cos(a)).toFixed(1)},${(cy + rr * Math.sin(a)).toFixed(1)}`); } return `<polygon points="${p.join(" ")}" fill="${c}"/>`; };
+  const topbar = (stars, prog) => `<rect width="320" height="26" fill="${BG}"/>${star(14, 13, 10)}${t(28, 18, `${stars}/10`, 14, INK, "start", 700)}<rect x="90" y="8" width="130" height="10" rx="5" fill="none" stroke="${DIM}"/><rect x="92" y="10" width="${Math.max(6, 126 * prog).toFixed(0)}" height="6" rx="3" fill="${GOLD}"/>` + btn(262, 3, 54, 20, "Done", BTN, "menu", 11);
+  const face = (cx, cy, mood, ink = INK, k = 1) => {
+    const e = 10 * k;
+    if (mood === "happy") return `<path d="M${cx - e - 5 * k} ${cy - 3 * k} q${5 * k} -${7 * k} ${10 * k} 0 M${cx + e - 5 * k} ${cy - 3 * k} q${5 * k} -${7 * k} ${10 * k} 0" stroke="${ink}" stroke-width="${3 * k}" fill="none" stroke-linecap="round"/><path d="M${cx - 7 * k} ${cy + 5 * k} q${7 * k} ${8 * k} ${14 * k} 0" stroke="${ink}" stroke-width="${3 * k}" fill="none" stroke-linecap="round"/>`;
+    if (mood === "sleep") return `<path d="M${cx - e - 5 * k} ${cy - 2 * k} q${5 * k} ${5 * k} ${10 * k} 0 M${cx + e - 5 * k} ${cy - 2 * k} q${5 * k} ${5 * k} ${10 * k} 0" stroke="${ink}" stroke-width="${3 * k}" fill="none" stroke-linecap="round"/><path d="M${cx - 4 * k} ${cy + 7 * k} h${8 * k}" stroke="${ink}" stroke-width="${2.5 * k}" stroke-linecap="round"/>`;
+    if (mood === "stir") return `<path d="M${cx - e - 5 * k} ${cy - 2 * k} q${5 * k} ${3 * k} ${10 * k} 0 M${cx + e - 5 * k} ${cy - 2 * k} q${5 * k} ${3 * k} ${10 * k} 0" stroke="${ink}" stroke-width="${3 * k}" fill="none" stroke-linecap="round"/><ellipse cx="${cx}" cy="${cy + 8 * k}" rx="${4 * k}" ry="${6 * k}" fill="${ink}"/>`;
+    if (mood === "loud") return `<path d="M${cx - e - 5 * k} ${cy - 7 * k} l${8 * k} ${4 * k} l-${8 * k} ${4 * k} M${cx + e + 5 * k} ${cy - 7 * k} l-${8 * k} ${4 * k} l${8 * k} ${4 * k}" stroke="${ink}" stroke-width="${3 * k}" fill="none" stroke-linecap="round"/><path d="M${cx - 8 * k} ${cy + 8 * k} q${3 * k} -${4 * k} ${6 * k} 0 t${6 * k} 0 t${4 * k} 0" stroke="${ink}" stroke-width="${2.5 * k}" fill="none"/>`;
+    return `<circle cx="${cx - e}" cy="${cy - 2 * k}" r="${3.5 * k}" fill="${ink}"/><circle cx="${cx + e}" cy="${cy - 2 * k}" r="${3.5 * k}" fill="${ink}"/><path d="M${cx - 6 * k} ${cy + 6 * k} q${6 * k} ${5 * k} ${12 * k} 0" stroke="${ink}" stroke-width="${2.5 * k}" fill="none" stroke-linecap="round"/>`;
+  };
+  const bubble = (txt, x, y, tx, ty) => { const w = txt.length * 6.5 + 20, mx = Math.max(x + 12, Math.min(x + w - 12, tx)); return `<polygon points="${mx - 6},${y + 22} ${mx + 6},${y + 22} ${tx},${ty}" fill="#fff" stroke="${INK}" stroke-width="2"/><rect x="${x}" y="${y}" width="${w}" height="24" rx="10" fill="#fff" stroke="${INK}" stroke-width="2"/><rect x="${mx - 5}" y="${y + 19}" width="10" height="4" fill="#fff"/>${t(x + w / 2, y + 16, txt, 12)}`; };
+  const skyBg = (tm) => { let o = `<rect width="320" height="240" fill="${SKY}"/>`; for (let i = 0; i < 24; i++) { const x = (i * 67 + tm * 12 * (1 + i % 3)) % 320, y = 30 + (i * 41) % 200, tw = .4 + .6 * Math.abs(Math.sin(tm * 1.5 + i)); o += `<circle cx="${(320 - x).toFixed(0)}" cy="${y}" r="${1 + (i % 3) * .6}" fill="#fff" opacity="${tw.toFixed(2)}"/>`; } return o; };
+
+  // ---------------- state ----------------
+  const S = { game: "menu", lvl: 55, pitch: 300, auto: false, stars: 0, prog: 0, t: 0, msg: null, msgT: 0 };
+  const zone = v => v < FLOOR ? "quiet" : v < WARN_AT ? "inside" : v < LINE ? "warn" : "loud";
+  const zoneLabel = { quiet: "quiet", inside: "inside voice", warn: "getting loud", loud: "too loud" };
+  function earn(n = 1) { S.stars += n; S.prog = 0; say("Super star!"); }
+  function say(m, secs = 2.5) { S.msg = m; S.msgT = secs; }
+
+  // ---------------- games ----------------
+  const G = {};
+
+  // 1 Rocket Ride: altitude = voice; rings sit in the inside-voice band
+  const rocket = { rings: [], asteroids: [], score: 0, bump: 0, y: 150 };
+  G.rocket = {
+    title: "Rocket Ride", desc: "Steady inside voice flies the rocket through the rings",
+    about: "His/her voice is the rocket's engine: quiet sinks, loud climbs. The rings sit at inside-voice height, so he/she practices holding a steady, comfortable volume. Too loud only means a soft bump off a sponge asteroid, never a crash. Ten rings earn a star.",
+    reset() { rocket.rings = [{ x: 330 }, { x: 460 }, { x: 590 }]; rocket.asteroids = [{ x: 400, y: 48 }, { x: 540, y: 60 }]; rocket.score = 0; rocket.bump = 0; rocket.y = 150; },
+    tick(dt) {
+      const target = 205 - (S.lvl - 30) / 55 * 165;      // 30 dB -> 205, 85 dB -> 40
+      rocket.y += (target - rocket.y) * Math.min(1, dt * 4);
+      const speed = 70;
+      for (const r of rocket.rings) { r.x -= speed * dt; if (r.x < -20) { r.x += 390; r.hit = false; } if (!r.hit && Math.abs(r.x - 70) < 6) { r.hit = true; if (rocket.y > 95 && rocket.y < 170) { rocket.score++; S.prog = (rocket.score % 10) / 10; if (rocket.score % 10 === 0) earn(); else say("Nice flying!"); } } }
+      for (const a of rocket.asteroids) { a.x -= speed * dt; if (a.x < -30) a.x += 420; if (Math.abs(a.x - 70) < 22 && rocket.y < 75) { rocket.bump = .6; a.x = 360 + Math.random() * 80; say("Bonk! A little quieter"); } }
+      rocket.bump = Math.max(0, rocket.bump - dt);
+    },
+    draw() {
+      let o = skyBg(S.t);
+      o += `<rect x="0" y="95" width="320" height="75" fill="#ffffff" opacity="0.06"/>` + t(314, 110, "inside voice lane", 9, "#9fb3c8", "end");
+      for (const r of rocket.rings) o += `<ellipse cx="${r.x.toFixed(0)}" cy="132" rx="9" ry="34" fill="none" stroke="${r.hit ? GOOD : GOLD}" stroke-width="5"/>`;
+      for (const a of rocket.asteroids) o += `<circle cx="${a.x.toFixed(0)}" cy="${a.y}" r="18" fill="#8a94a6"/><circle cx="${(a.x - 6).toFixed(0)}" cy="${a.y - 5}" r="4" fill="#6f788a"/><circle cx="${(a.x + 7).toFixed(0)}" cy="${a.y + 6}" r="3" fill="#6f788a"/>`;
+      const rx = 70 + (rocket.bump ? Math.sin(S.t * 40) * 3 : 0), ry = rocket.y;
+      const flame = 6 + Math.max(0, S.lvl - 45) / 4 + Math.sin(S.t * 30) * 2;
+      o += `<polygon points="${rx - 22},${ry - 4} ${rx - 22 - flame * 1.6},${ry} ${rx - 22},${ry + 4}" fill="${WARN}"/><polygon points="${rx - 22},${ry - 2} ${rx - 22 - flame},${ry} ${rx - 22},${ry + 2}" fill="#fff"/>`;
+      o += `<ellipse cx="${rx}" cy="${ry}" rx="24" ry="10" fill="#e9eef5"/><polygon points="${rx + 22},${ry - 6} ${rx + 36},${ry} ${rx + 22},${ry + 6}" fill="${LOUD}"/><polygon points="${rx - 14},${ry - 8} ${rx - 24},${ry - 18} ${rx - 10},${ry - 8}" fill="${LOUD}"/><polygon points="${rx - 14},${ry + 8} ${rx - 24},${ry + 18} ${rx - 10},${ry + 8}" fill="${LOUD}"/><circle cx="${rx + 4}" cy="${ry}" r="5" fill="#5aa0e6" stroke="#fff" stroke-width="1.5"/>`;
+      o += t(8, 236, `Rings: ${rocket.score}`, 12, "#fff", "start", 700);
+      return o;
+    }
+  };
+
+  // 2 Whisper, Talk, Cheer
+  const wtc = { cards: ["whisper", "inside", "cheer", "inside", "whisper", "cheer"], i: 0, hold: 0, done: false, flash: 0 };
+  const BAND = { whisper: [32, 46], inside: [48, 66], cheer: [68, 84] };
+  G.wtc = {
+    title: "Whisper, Talk, Cheer", desc: "Match the card: mouse, Buddy or lion",
+    about: "A card shows a mouse (whisper), Buddy (inside voice) or a lion (cheer!). Hold a matching voice for 2 seconds to get a tick and the next card. Loud is allowed here on purpose: practicing the whole range, and switching between levels on cue, builds control faster than only asking for quieter. Six cards earn a star.",
+    reset() { wtc.i = 0; wtc.hold = 0; wtc.done = false; wtc.flash = 0; },
+    tick(dt) {
+      if (wtc.done) return;
+      const [lo, hi] = BAND[wtc.cards[wtc.i]];
+      if (S.lvl >= lo && S.lvl <= hi) wtc.hold = Math.min(2, wtc.hold + dt); else wtc.hold = Math.max(0, wtc.hold - dt * 2);
+      if (wtc.hold >= 2) { wtc.flash = .8; wtc.hold = 0; wtc.i++; S.prog = wtc.i / 6; if (wtc.i >= 6) { wtc.done = true; earn(); } else say(["Perfect!", "That's it!", "Great match!"][wtc.i % 3]); }
+      wtc.flash = Math.max(0, wtc.flash - dt);
+    },
+    draw() {
+      const card = wtc.cards[Math.min(wtc.i, 5)], [lo, hi] = BAND[card];
+      let o = `<rect width="320" height="240" fill="${{ whisper: "#e6e2f5", inside: "#dff3e4", cheer: "#fde8c8" }[card]}"/>`;
+      o += `<rect x="20" y="36" width="150" height="190" rx="14" fill="#fff" stroke="${INK}" stroke-width="2"/>`;
+      const cx = 95, cy = 118;
+      if (card === "whisper") o += `<ellipse cx="${cx}" cy="${cy + 10}" rx="40" ry="30" fill="#b9b2c6"/><circle cx="${cx - 22}" cy="${cy - 14}" r="14" fill="#b9b2c6"/><circle cx="${cx + 22}" cy="${cy - 14}" r="14" fill="#b9b2c6"/><circle cx="${cx - 22}" cy="${cy - 14}" r="8" fill="#f2b9c4"/><circle cx="${cx + 22}" cy="${cy - 14}" r="8" fill="#f2b9c4"/>` + face(cx, cy + 6, "sleep") + t(cx, 200, "Whisper", 16, INK, "middle", 700);
+      else if (card === "inside") o += `<ellipse cx="${cx - 34}" cy="${cy - 10}" rx="12" ry="26" fill="${INK}" transform="rotate(14 ${cx - 34} ${cy - 10})"/><ellipse cx="${cx + 34}" cy="${cy - 10}" rx="12" ry="26" fill="${INK}" transform="rotate(-14 ${cx + 34} ${cy - 10})"/><circle cx="${cx}" cy="${cy}" r="38" fill="#fff" stroke="${INK}" stroke-width="3"/><ellipse cx="${cx}" cy="${cy + 10}" rx="8" ry="6" fill="${INK}"/>` + face(cx, cy - 4, "happy") + t(cx, 200, "Inside voice", 16, INK, "middle", 700);
+      else o += `<circle cx="${cx}" cy="${cy}" r="48" fill="#e0902a"/><circle cx="${cx}" cy="${cy}" r="34" fill="#f2c27a"/>` + face(cx, cy, "happy", "#5a3a10", 1.2) + `<path d="M${cx - 10} ${cy + 14} q10 12 20 0" stroke="#5a3a10" stroke-width="3" fill="none"/>` + t(cx, 200, "Cheer!", 16, INK, "middle", 700);
+      // meter with target band
+      const my = v => 214 - (v - 30) / 55 * 170;
+      o += `<rect x="236" y="40" width="30" height="178" rx="10" fill="#fff" stroke="${INK}" stroke-width="2"/><rect x="238" y="${my(hi).toFixed(0)}" width="26" height="${(my(lo) - my(hi)).toFixed(0)}" rx="6" fill="${GOOD}" opacity="0.35"/>`;
+      const col = S.lvl >= lo && S.lvl <= hi ? GOOD : (S.lvl > hi ? LOUD : DIM);
+      o += `<rect x="241" y="${my(S.lvl).toFixed(0)}" width="20" height="${(214 - my(S.lvl)).toFixed(0)}" rx="5" fill="${col}"/>`;
+      o += t(251, 232, "you", 10, INK) + t(290, 60, "cards", 10, DIM) + t(290, 78, `${Math.min(wtc.i, 6)} / 6`, 16, INK, "middle", 700);
+      o += `<circle cx="290" cy="120" r="18" fill="none" stroke="${DIM}" stroke-width="4"/><circle cx="290" cy="120" r="18" fill="none" stroke="${GOOD}" stroke-width="4" stroke-dasharray="${(113 * wtc.hold / 2).toFixed(1)} 113" transform="rotate(-90 290 120)"/>` + t(290, 124, "hold", 9, INK);
+      if (wtc.flash > 0) o += `<circle cx="95" cy="118" r="30" fill="${GOOD}" opacity="${(wtc.flash).toFixed(2)}"/><path d="M80 118 l10 10 l20 -22" stroke="#fff" stroke-width="6" fill="none" stroke-linecap="round" opacity="${wtc.flash.toFixed(2)}"/>`;
+      if (wtc.done) o += t(95, 30, "All done!", 14, GOOD, "middle", 700);
+      return o;
+    }
+  };
+
+  // 3 Don't Wake the Baby
+  const baby = { sleep: 1, time: 0, stir: 0, done: false, woke: 0 };
+  G.baby = {
+    title: "Don't Wake the Baby", desc: "Whisper a story for 20 seconds without waking the baby moon",
+    about: "A baby moon is asleep. Count to ten, tell a story or sing softly for 20 seconds. Talking at a whisper or inside voice keeps it sleeping; getting loud makes it stir and yawn (it never cries), and too loud restarts the timer with a gentle \"shh\". Finishing earns a star. Good for bedtime practice.",
+    reset() { baby.sleep = 1; baby.time = 0; baby.stir = 0; baby.done = false; baby.woke = 0; },
+    tick(dt) {
+      if (baby.done) return;
+      const z = zone(S.lvl);
+      if (z === "loud") { baby.woke = 1.2; baby.time = 0; if (baby.stir < 1) say("Shh... let's start again"); baby.stir = 1; }
+      else if (z === "warn") baby.stir = Math.min(1, baby.stir + dt * 1.5);
+      else { baby.stir = Math.max(0, baby.stir - dt); if (S.lvl >= 36) baby.time += dt; }
+      baby.woke = Math.max(0, baby.woke - dt);
+      S.prog = baby.time / 20;
+      if (baby.time >= 20) { baby.done = true; earn(); }
+    },
+    draw() {
+      let o = `<rect width="320" height="240" fill="#1d1d36"/>`;
+      for (let i = 0; i < 16; i++) o += `<circle cx="${(i * 71) % 320}" cy="${30 + (i * 53) % 190}" r="1.2" fill="#fff" opacity="${(.3 + .5 * Math.abs(Math.sin(S.t + i))).toFixed(2)}"/>`;
+      const cx = 120, cy = 135, breathe = 1 + .02 * Math.sin(S.t * 1.5);
+      o += `<circle cx="${cx}" cy="${cy}" r="${(60 * breathe).toFixed(1)}" fill="#f2e7b8"/><circle cx="${cx + 20}" cy="${cy - 30}" r="7" fill="#e3d6a2"/><circle cx="${cx - 30}" cy="${cy + 25}" r="5" fill="#e3d6a2"/>`;
+      o += `<path d="M${cx - 44} ${cy + 30} q44 ${22 + baby.stir * 6} 88 0 v40 h-88 z" fill="#8fb8e6"/>`;
+      o += face(cx, cy - 2, baby.stir > .6 ? "stir" : "sleep", "#4a3a20", 1.3);
+      if (baby.stir < .6) { const zt = (S.t % 3); o += t(cx + 60 + zt * 4, cy - 50 - zt * 10, "z", 18, "#c9c2f0") + t(cx + 76 + zt * 3, cy - 68 - zt * 8, "Z", 24, "#c9c2f0"); }
+      // sleep meter
+      o += t(262, 48, "sleeping", 11, "#c9c2f0") + `<rect x="246" y="56" width="32" height="150" rx="10" fill="#2e2e52"/><rect x="249" y="${(59 + 144 * baby.stir).toFixed(0)}" width="26" height="${(144 * (1 - baby.stir)).toFixed(0)}" rx="8" fill="${baby.stir > .6 ? WARN : "#9fd1a9"}"/>`;
+      o += t(262, 226, `${Math.ceil(20 - baby.time)} s to go`, 11, "#fff");
+      if (baby.woke > 0) o += bubble("Shh...", 20, 40, 60, 76);
+      if (baby.done) o += bubble("Still asleep. Star!", 20, 40, 60, 76);
+      return o;
+    }
+  };
+
+  // 4 Balloon Breath
+  const bal = { fill: 0, float: 0, pops: 0 };
+  G.balloon = {
+    title: "Balloon Breath", desc: "A long steady 'ahhh' fills the balloon",
+    about: "A long, steady \"ahhh\" at inside volume slowly fills the balloon. Stop and it leaks a little; go too loud and it floats gently away and a new one appears. A full balloon turns into a star balloon. It practices calm breathing and a held, even volume rather than bursts.",
+    reset() { bal.fill = 0; bal.float = 0; },
+    tick(dt) {
+      if (bal.float > 0) { bal.float += dt; if (bal.float > 1.6) { bal.float = 0; bal.fill = 0; } return; }
+      const z = zone(S.lvl);
+      if (z === "inside") bal.fill = Math.min(1, bal.fill + dt / 6);
+      else if (z === "loud") { bal.float = .01; say("Whoosh! Softer next time"); return; }
+      else bal.fill = Math.max(0, bal.fill - dt / 20);
+      S.prog = bal.fill;
+      if (bal.fill >= 1) { earn(); bal.fill = 0; }
+    },
+    draw() {
+      let o = `<rect width="320" height="240" fill="#e4f1f7"/>`;
+      o += `<ellipse cx="60" cy="60" rx="30" ry="14" fill="#fff"/><ellipse cx="250" cy="40" rx="40" ry="16" fill="#fff"/><rect x="0" y="210" width="320" height="30" fill="#bfe3c0"/>`;
+      const r = 18 + bal.fill * 52, lift = bal.float > 0 ? bal.float * 160 : 0;
+      const bx = 160 + (bal.float > 0 ? Math.sin(bal.float * 6) * 10 : 0), by = 150 - r * .5 - lift;
+      const col = bal.fill >= .99 ? GOLD : "#f28b9c";
+      o += `<path d="M${bx} ${by + r + 2} q-4 ${20 + bal.fill * 8} 2 ${40 + bal.fill * 10}" stroke="${INK}" stroke-width="1.5" fill="none"/>`;
+      o += `<ellipse cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" rx="${r.toFixed(1)}" ry="${(r * 1.15).toFixed(1)}" fill="${col}"/><ellipse cx="${(bx - r * .35).toFixed(1)}" cy="${(by - r * .4).toFixed(1)}" rx="${(r * .22).toFixed(1)}" ry="${(r * .3).toFixed(1)}" fill="#fff" opacity="0.6"/><polygon points="${bx - 5},${by + r * 1.15} ${bx + 5},${by + r * 1.15} ${bx},${by + r * 1.15 + 7}" fill="${col}"/>`;
+      if (bal.fill > .3 && bal.float === 0) o += face(bx, by, "happy", "#6b2a3a", bal.fill);
+      // the mouth / breath indicator
+      const z = zone(S.lvl), c = z === "inside" ? GOOD : z === "loud" ? LOUD : z === "warn" ? WARN : DIM;
+      o += `<rect x="20" y="186" width="280" height="14" rx="7" fill="#fff" stroke="${DIM}"/><rect x="22" y="188" width="${(276 * bal.fill).toFixed(0)}" height="10" rx="5" fill="${col}"/>`;
+      o += t(160, 226, z === "inside" ? "ahhh... keep going" : z === "quiet" ? "take a breath and go 'ahhh'" : z === "warn" ? "a little softer" : "too loud!", 12, c, "middle", 700);
+      return o;
+    }
+  };
+
+  // 5 Planet Glide (pitch)
+  const glide = { y: 120, gaps: [], score: 0 };
+  G.glide = {
+    title: "Planet Glide", desc: "Sing high and low to steer Saturn through the gaps",
+    about: "Saturn glides at the height of his/her voice pitch: sing higher to go up, lower to go down, and steer through the gaps in the clouds. This one is about the up-and-down music of speech, which can be flat for some autistic kids, and it's good fun. Volume still matters: too loud and the clouds thicken until it's calmer.",
+    reset() { glide.gaps = [{ x: 340, y: 80 }, { x: 500, y: 150 }, { x: 660, y: 110 }]; glide.score = 0; glide.y = 120; },
+    tick(dt) {
+      const target = 200 - (S.pitch - 150) / 450 * 150;
+      glide.y += (target - glide.y) * Math.min(1, dt * 4);
+      for (const g of glide.gaps) { g.x -= 60 * dt; if (g.x < -30) { g.x += 480; g.y = 60 + Math.random() * 110; g.hit = false; } if (!g.hit && Math.abs(g.x - 80) < 5) { g.hit = true; if (Math.abs(glide.y - g.y) < 34) { glide.score++; S.prog = (glide.score % 8) / 8; if (glide.score % 8 === 0) earn(); else say("Whee!"); } } }
+    },
+    draw() {
+      let o = skyBg(S.t * .5);
+      const thick = zone(S.lvl) === "loud" ? .9 : .55;
+      for (const g of glide.gaps) o += `<rect x="${(g.x - 14).toFixed(0)}" y="28" width="28" height="${(g.y - 36).toFixed(0)}" rx="12" fill="#c8d2e2" opacity="${thick}"/><rect x="${(g.x - 14).toFixed(0)}" y="${(g.y + 36).toFixed(0)}" width="28" height="${(240 - g.y - 36).toFixed(0)}" rx="12" fill="#c8d2e2" opacity="${thick}"/>`;
+      const cx = 80, cy = glide.y;
+      o += `<ellipse cx="${cx}" cy="${cy}" rx="38" ry="9" fill="none" stroke="${GOOD}" stroke-width="5" transform="rotate(-12 ${cx} ${cy})"/>`;
+      o += `<circle cx="${cx}" cy="${cy.toFixed(1)}" r="20" fill="#e8c27a"/>` + face(cx, cy, "happy", "#4a3420", .8);
+      o += `<path d="M${cx - 38} ${cy + 1} A38 9 0 0 0 ${cx + 38} ${cy - 1}" fill="none" stroke="${GOOD}" stroke-width="5" transform="rotate(-12 ${cx} ${cy})" opacity="0"/>`;
+      o += t(8, 236, `Gaps: ${glide.score}`, 12, "#fff", "start", 700) + t(312, 236, "sing higher to go up", 10, "#9fb3c8", "end");
+      return o;
+    }
+  };
+
+  // 6 Read-Along
+  const read = { lines: ["The little dog ran to the park.", "He saw a big red ball.", "They played until the sun went down."], li: 0, wi: 0, acc: 0, pause: 0, done: false };
+  G.read = {
+    title: "Read-Along", desc: "Words light up as he/she reads aloud at a good volume",
+    about: "A short sentence appears and the words light up one by one while he/she reads aloud, karaoke-style. Reading too loud pauses the highlight and Buddy covers his ears until it's calmer; too quiet and nothing moves. Three sentences earn a star. Buddy hears that he/she is reading, how loud and for how long, not the exact words, so you stay the judge of the reading itself. Sentences and spelling words can be added from the web page.",
+    reset() { read.li = 0; read.wi = 0; read.acc = 0; read.pause = 0; read.done = false; },
+    tick(dt) {
+      if (read.done) return;
+      const z = zone(S.lvl), words = read.lines[read.li].split(" ");
+      if (z === "loud") { read.pause = 1; return; }
+      read.pause = Math.max(0, read.pause - dt);
+      if (z === "inside" || z === "warn") {
+        read.acc += dt;
+        if (read.acc > .45) { read.acc = 0; read.wi++; if (read.wi >= words.length) { read.li++; read.wi = 0; S.prog = read.li / 3; if (read.li >= 3) { read.done = true; read.li = 2; read.wi = words.length; earn(); } else say("Lovely reading!"); } }
+      }
+    },
+    draw() {
+      let o = `<rect width="320" height="240" fill="#fff8ea"/>`;
+      o += `<rect x="14" y="34" width="292" height="118" rx="12" fill="#fff" stroke="#e5d8bd"/>`;
+      const words = read.lines[read.li].split(" ");
+      let x = 28, y = 70, row = [];
+      const parts = [];
+      for (let i = 0; i < words.length; i++) { const w = words[i], wid = w.length * 9 + 10; if (x + wid > 296) { x = 28; y += 32; } parts.push({ w, x, y, i }); x += wid; }
+      for (const p of parts) { const done = p.i < read.wi, cur = p.i === read.wi && !read.done; if (done || cur) o += `<rect x="${p.x - 3}" y="${p.y - 18}" width="${p.w.length * 9 + 6}" height="26" rx="6" fill="${done ? "#d9f2e0" : WARN}" opacity="${cur ? .6 : 1}"/>`; o += t(p.x, p.y, p.w, 17, done ? "#2a6b43" : INK, "start", done || cur ? 700 : 400); }
+      // Buddy listening
+      const cx = 60, cy = 196, loud = read.pause > 0;
+      o += `<ellipse cx="${cx - 24}" cy="${cy - 6}" rx="8" ry="18" fill="${INK}" transform="rotate(14 ${cx - 24} ${cy - 6})"/><ellipse cx="${cx + 24}" cy="${cy - 6}" rx="8" ry="18" fill="${INK}" transform="rotate(-14 ${cx + 24} ${cy - 6})"/><circle cx="${cx}" cy="${cy}" r="26" fill="#fff" stroke="${INK}" stroke-width="2.5"/><ellipse cx="${cx}" cy="${cy + 7}" rx="6" ry="4" fill="${INK}"/>` + face(cx, cy - 3, loud ? "loud" : "happy", INK, .8);
+      if (loud) o += `<rect x="${cx - 40}" y="${cy - 14}" width="14" height="22" rx="6" fill="#fff" stroke="${INK}" stroke-width="2"/><rect x="${cx + 26}" y="${cy - 14}" width="14" height="22" rx="6" fill="#fff" stroke="${INK}" stroke-width="2"/>`;
+      const z = zone(S.lvl);
+      o += t(110, 192, read.done ? "You read all three!" : loud ? "Ooh, too loud. Softer and keep going" : z === "quiet" ? "Read it out loud to me" : "I'm listening...", 12, loud ? LOUD : INK, "start", 700);
+      o += t(110, 212, `Sentence ${Math.min(read.li + 1, 3)} of 3`, 11, DIM, "start");
+      return o;
+    }
+  };
+
+  // Menu
+  const ORDER = ["rocket", "wtc", "baby", "balloon", "glide", "read"];
+  const ICON = {
+    rocket: (x, y) => `<ellipse cx="${x}" cy="${y}" rx="18" ry="8" fill="#e9eef5" transform="rotate(-30 ${x} ${y})"/><polygon points="${x + 14},${y - 10} ${x + 24},${y - 18} ${x + 18},${y - 4}" fill="${LOUD}"/>`,
+    wtc: (x, y) => `<circle cx="${x - 12}" cy="${y}" r="9" fill="#b9b2c6"/><circle cx="${x + 12}" cy="${y}" r="11" fill="#f2c27a"/>`,
+    baby: (x, y) => `<circle cx="${x}" cy="${y}" r="16" fill="#f2e7b8"/>` + face(x, y, "sleep", "#4a3a20", .7),
+    balloon: (x, y) => `<ellipse cx="${x}" cy="${y - 2}" rx="13" ry="16" fill="#f28b9c"/><path d="M${x} ${y + 14} q-3 8 2 14" stroke="${INK}" fill="none"/>`,
+    glide: (x, y) => `<ellipse cx="${x}" cy="${y}" rx="22" ry="5" fill="none" stroke="${GOOD}" stroke-width="3" transform="rotate(-12 ${x} ${y})"/><circle cx="${x}" cy="${y}" r="11" fill="#e8c27a"/>`,
+    read: (x, y) => `<rect x="${x - 16}" y="${y - 12}" width="32" height="24" rx="3" fill="#fff" stroke="${INK}"/><path d="M${x - 10} ${y - 4} h20 M${x - 10} ${y + 2} h14" stroke="#d9f2e0" stroke-width="3"/>`
+  };
+  G.menu = {
+    title: "Games menu", desc: "",
+    about: "Opens from a Games button on Buddy's main screen (or from the web page). Each tile is one game; stars earned in games count toward the same daily goal. A parent can turn individual games off in Settings.",
+    reset() {}, tick() {},
+    draw() {
+      let o = `<rect width="320" height="240" fill="${BG}"/>` + t(160, 22, "Let's play!", 18, INK, "middle", 700);
+      ORDER.forEach((k, i) => { const x = 10 + (i % 3) * 102, y = 36 + Math.floor(i / 3) * 96; o += `<g data-act="play:${k}"><rect x="${x}" y="${y}" width="96" height="86" rx="12" fill="#fff" stroke="#d8d3c8"/>${ICON[k](x + 48, y + 34)}${t(x + 48, y + 74, G[k].title, 10.5, INK, "middle", 700)}</g>`; });
+      return o;
+    }
+  };
+
+  // ---------------- rendering ----------------
+  const screenEl = document.getElementById("screen"), aboutEl = document.getElementById("about"), listEl = document.getElementById("list");
+  function render() {
+    const g = G[S.game];
+    let o = g.draw();
+    if (S.game !== "menu") o += topbar(S.stars, S.prog);
+    if (S.msg && S.game !== "menu") o += bubble(S.msg, 170, 36, 300, 60);
+    screenEl.innerHTML = `<svg viewBox="0 0 320 240" role="img" aria-label="${esc(g.title)}">${o}</svg>`;
+    const z = zone(S.lvl), c = { quiet: "#8fa3b8", inside: "#46a06e", warn: "#e8b02e", loud: "#f08264" }[z];
+    const led = document.getElementById("led"); led.style.background = c; led.style.boxShadow = `0 0 10px ${c}`;
+  }
+  function open(k) {
+    S.game = k; S.msg = null; G[k].reset(); S.prog = 0;
+    aboutEl.querySelector("h2").textContent = G[k].title;
+    aboutEl.querySelector("p").textContent = G[k].about;
+    document.getElementById("pitchBox").hidden = k !== "glide";
+    [...listEl.children].forEach(b => b.setAttribute("aria-current", String(b.dataset.k === k)));
+    render();
+  }
+  ORDER.forEach((k, i) => {
+    const b = document.createElement("button"); b.type = "button"; b.dataset.k = k;
+    b.innerHTML = `<span class="n">${i + 1}</span><span><b>${esc(G[k].title)}</b><span class="d">${esc(G[k].desc)}</span></span>`;
+    b.addEventListener("click", () => open(k)); listEl.appendChild(b);
+  });
+  screenEl.addEventListener("click", e => { const g = e.target.closest("[data-act]"); if (!g) return; const a = g.dataset.act; if (a === "menu") open("menu"); else if (a.startsWith("play:")) open(a.slice(5)); });
+  document.getElementById("menuBtn").addEventListener("click", () => open("menu"));
+  const lvlIn = document.getElementById("lvl"), lvlOut = document.getElementById("lvlOut"), pIn = document.getElementById("pitch"), pOut = document.getElementById("pitchOut"), autoBtn = document.getElementById("auto");
+  lvlIn.addEventListener("input", () => { S.lvl = +lvlIn.value; S.auto = false; autoBtn.setAttribute("aria-pressed", "false"); });
+  pIn.addEventListener("input", () => { S.pitch = +pIn.value; });
+  autoBtn.addEventListener("click", () => { S.auto = !S.auto; autoBtn.setAttribute("aria-pressed", String(S.auto)); });
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(.1, (now - last) / 1000); last = now; S.t += dt;
+    if (S.auto) { S.lvl = Math.round(56 + 14 * Math.sin(S.t * .7) + 6 * Math.sin(S.t * 2.3)); lvlIn.value = S.lvl; S.pitch = Math.round(350 + 170 * Math.sin(S.t * .9)); pIn.value = S.pitch; }
+    lvlOut.textContent = `${S.lvl} dB · ${zoneLabel[zone(S.lvl)]}`; pOut.textContent = `${S.pitch} Hz`;
+    if (S.msgT > 0) { S.msgT -= dt; if (S.msgT <= 0) S.msg = null; }
+    G[S.game].tick(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+  open("menu");
+  requestAnimationFrame(loop);
+})();
+</script>
