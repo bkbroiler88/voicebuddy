@@ -216,7 +216,7 @@ These are general suggestions. Adapt them to what works for your child and to an
 
 ## Technical reference
 
-Source code and the flashable image: [github.com/bkbroiler88/voicebuddy](https://github.com/bkbroiler88/voicebuddy). Built with PlatformIO (espressif32 6.12.0, Arduino core 2.0.17).
+Source code and the flashable image: [github.com/bkbroiler88/voicebuddy](https://github.com/bkbroiler88/voicebuddy). Built with PlatformIO and the pioarduino core (Arduino 3.x on ESP-IDF 5.5).
 
 **Flash it over USB.** The whole image flashes at address 0x0, for example with ESP Web Flasher or `esptool.py --chip esp32s3 write_flash 0x0 bin/voicebuddy-es3c28p.bin`. From source: `pio run -t erase` then `pio run -t upload`. A full erase also clears a forgotten PIN.
 
@@ -232,7 +232,7 @@ Source code and the flashable image: [github.com/bkbroiler88/voicebuddy](https:/
 
 The board's own documentation lists the audio data pins the other way round. On this board the microphone is really on IO6.
 
-**Flash layout (16 MB):** settings 20 KB · firmware slot A 6.25 MB · firmware slot B 6.25 MB (for updates) · storage 3.4 MB (certificate, signed-in browsers, history) · crash log 64 KB. The firmware is about 1.2 MB.
+**Flash layout (16 MB):** settings 20 KB · firmware slot A 3.25 MB · firmware slot B 3.25 MB (for updates) · storage 5.5 MB (certificate, signed-in browsers, history, content packs) · speech models 3.9 MB · crash log 64 KB. The firmware is about 1.4 MB.
 
 **How the work is split:** one processor core runs the microphone, pitch detection, WiFi sensing and the web server; the other only draws the screen, so animations stay smooth. Screen buffers live in the board's 8 MB PSRAM.
 
