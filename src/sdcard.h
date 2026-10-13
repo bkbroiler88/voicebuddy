@@ -6,6 +6,7 @@
 
 bool     sdBegin();                 // try to mount (safe to call again after inserting a card)
 bool     sdMounted();
+bool     sdFormat();                // erase the card and lay down FAT32, then mount (slow: up to a few minutes)
 uint64_t sdTotalMB();
 uint64_t sdUsedMB();
-void     sdStatus(char *buf, size_t n);   // "15 GB card, 12 MB used" / "No card"
+void     sdStatus(char *buf, size_t n);   // "15 GB card, 12 MB used" / "No card" / why it would not mount

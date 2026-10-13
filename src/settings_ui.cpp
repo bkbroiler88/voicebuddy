@@ -40,6 +40,7 @@ static uint32_t toastMs = 0;
 static int napMin;                          // g.sleepAfter shown in minutes
 static bool qrMode = false;                 // full-screen QR code over the web page
 static bool resetMode = false;              // factory reset confirmation
+static bool formatMode = false;             // SD card format confirmation
 
 static void aFactory();
 static void say(const char *m) { strncpy(toast, m, sizeof(toast) - 1); toastMs = millis(); }
@@ -98,7 +99,7 @@ static void subSd(char *b, size_t n) { sdStatus(b, n); }
 static void subFw(char *b, size_t n) { snprintf(b, n, "Running from %s", esp_ota_get_running_partition()->label); }
 static void btnFw(char *b, size_t n) { snprintf(b, n, "%s", FW_VERSION); }
 static void subMem(char *b, size_t n) { snprintf(b, n, "%u KB RAM, %u KB PSRAM free", ESP.getFreeHeap() / 1024, ESP.getFreePsram() / 1024); }
-static void aSdCheck() { say(sdBegin() ? "Card found" : "No card found"); }
+static void aSdCheck() { sdBegin(); char b[48]; sdStatus(b, sizeof(b)); say(b); }
 static void aSpeechTest() { speechTestEnter(); }
 
 static const char *const VIEWS[4] = {"Pup", "Dial", "Saturn", "Planets"};
@@ -147,6 +148,37 @@ static void drawResetConfirm() {
 }
 
 static void aFactory() { resetMode = true; drawResetConfirm(); }
+
+static void drawFormatConfirm() {
+  tft.fillScreen(C_SCREEN);
+  tft.fillRect(0, 0, 320, 28, C_LOUD);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(C_BTN_TX, C_LOUD);
+  tft.drawString("Format SD card", 160, 14, 2);
+  tft.setTextColor(C_TEXT, C_SCREEN);
+  tft.drawString("Erase the card?", 160, 54, 4);
+  char b[48]; sdStatus(b, sizeof(b));
+  tft.setTextColor(C_DIM, C_SCREEN);
+  tft.drawString(b, 160, 90, 2);
+  tft.drawString("Everything on the card is deleted and it is", 160, 120, 2);
+  tft.drawString("set up as FAT32, the format Buddy reads.", 160, 138, 2);
+  tft.drawString("Big cards take a minute or two.", 160, 166, 2);
+  drawButton(10, 204, 140, 32, "Cancel", C_OFF, C_BTN_TX);
+  drawButton(170, 204, 140, 32, "Erase card", C_LOUD, C_BTN_TX);
+}
+static void aSdFormat() { formatMode = true; drawFormatConfirm(); }
+static void doSdFormat() {
+  tft.fillScreen(C_SCREEN);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(C_TEXT, C_SCREEN);
+  tft.drawString("Formatting...", 160, 100, 4);
+  tft.setTextColor(C_DIM, C_SCREEN);
+  tft.drawString("Please leave the card in.", 160, 140, 2);
+  bool ok = sdFormat();
+  formatMode = false;
+  drawAll();
+  say(ok ? "Card ready" : "Format failed");
+}
 
 static void doFactoryReset() {
   tft.fillScreen(C_SCREEN);
@@ -259,6 +291,7 @@ static SRow tabSetup[] = {
 };
 static SRow tabDevice[] = {
   ACT("SD card", nullptr, subSd, "Check", nullptr, aSdCheck),
+  ACT("Format SD card", "Erase it and set it up as FAT32", nullptr, "Format", nullptr, aSdFormat),
   ACT("Speech test", "10 words, for the reading games", nullptr, "Start", nullptr, aSpeechTest),
   INFO("Firmware", nullptr, subFw, btnFw),
   INFO("Memory", nullptr, subMem, nullptr),
@@ -267,7 +300,7 @@ static SRow tabDevice[] = {
 
 struct Tab { const char *name; SRow *rows; int n; };
 static Tab tabs[NTABS + 1] = {
-  {"Voice", tabVoice, 5}, {"Room", tabRoom, 5}, {"Stars", tabStars, 5}, {"Screen", tabScreen, 5}, {"Setup", tabSetup, 5}, {"Device", tabDevice, 5},
+  {"Voice", tabVoice, 5}, {"Room", tabRoom, 5}, {"Stars", tabStars, 5}, {"Screen", tabScreen, 5}, {"Setup", tabSetup, 5}, {"Device", tabDevice, 6},
   {"WiFi & web control", tabWeb, 5},
 };
 
@@ -379,12 +412,13 @@ static void drawAll() {
 }
 
 // ---------------- public ----------------
-void settingsRedraw() { if (!qrMode && !resetMode) drawAll(); }
+void settingsRedraw() { if (!qrMode && !resetMode && !formatMode) drawAll(); }
 
 void settingsEnter(int tab) {
   screen = SCR_SETTINGS;
   qrMode = false;
   resetMode = false;
+  formatMode = false;
   curTab = constrain(tab, 0, NTABS);
   napMin = max(1, g.sleepAfter / 60);
   toast[0] = 0;
@@ -397,6 +431,11 @@ bool settingsTap(int x, int y) {
   if (resetMode) {
     if (y >= 200 && x >= 166) doFactoryReset();
     else if (y >= 200 && x < 154) { resetMode = false; drawAll(); }
+    return false;
+  }
+  if (formatMode) {
+    if (y >= 200 && x >= 166) doSdFormat();
+    else if (y >= 200 && x < 154) { formatMode = false; drawAll(); }
     return false;
   }
   if (curTab == TAB_WEB && y < 28) {
@@ -432,7 +471,7 @@ bool settingsTap(int x, int y) {
       case K_ACT:
         if (x < 208) return false;
         r.act();
-        if (screen == SCR_SETTINGS && !qrMode && !resetMode) { drawControl(i); drawSub(i); drawFooter(); }
+        if (screen == SCR_SETTINGS && !qrMode && !resetMode && !formatMode) { drawControl(i); drawSub(i); drawFooter(); }
         return false;
       case K_INFO:
         return false;
@@ -443,7 +482,7 @@ bool settingsTap(int x, int y) {
 
 void settingsTick() {
   static uint32_t last = 0;
-  if (qrMode || resetMode || millis() - last < 300) return;
+  if (qrMode || resetMode || formatMode || millis() - last < 300) return;
   last = millis();
   if (curTab == TAB_WEB)
     for (int i = 0; i < tabs[curTab].n; i++) if (tabs[curTab].rows[i].kind == K_INFO) drawControl(i);
