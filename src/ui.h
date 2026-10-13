@@ -3,7 +3,7 @@
 
 // Shared between main.cpp (child screen, PIN, loop), settings_ui.cpp and wizard.cpp
 
-enum Screen { SCR_CHILD, SCR_PIN, SCR_SETTINGS, SCR_WIZARD, SCR_NOTICE };
+enum Screen { SCR_CHILD, SCR_PIN, SCR_SETTINGS, SCR_WIZARD, SCR_NOTICE, SCR_SPEECHTEST };
 extern Screen screen;
 
 extern TFT_eSPI tft;
@@ -24,7 +24,7 @@ float currentLimitDb();         // the too-loud line right now (distance + room 
 float currentLevelDb();         // what the meter shows right now
 
 // settings_ui.cpp
-enum { TAB_VOICE, TAB_ROOM, TAB_STARS, TAB_SCREEN, TAB_SETUP, NTABS, TAB_WEB = NTABS };   // TAB_WEB: sub-page of Room
+enum { TAB_VOICE, TAB_ROOM, TAB_STARS, TAB_SCREEN, TAB_SETUP, TAB_DEVICE, NTABS, TAB_WEB = NTABS };   // TAB_WEB: sub-page of Room
 void settingsEnter(int tab);
 void settingsRedraw();
 bool settingsTap(int x, int y); // true = +/- (auto-repeat while held)
@@ -35,3 +35,8 @@ enum WizardMode { WIZ_FULL, WIZ_VOICE, WIZ_ZONES, WIZ_WIFI, WIZ_GROWNUP, WIZ_CHE
 void wizardEnter(WizardMode m);
 void wizardTap(int x, int y);
 void wizardTick();
+
+// speechtest.cpp
+void speechTestEnter();
+void speechTestTap(int x, int y);
+void speechTestTick();

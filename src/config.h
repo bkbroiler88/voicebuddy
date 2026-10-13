@@ -20,6 +20,14 @@
 #define AMP_EN_PIN     1
 #define AMP_ON_LEVEL   LOW
 
+// microSD, 4-bit SDIO (per the board BSP; slot untested until a card is tried)
+#define SD_CLK_PIN     38
+#define SD_CMD_PIN     40
+#define SD_D0_PIN      39
+#define SD_D1_PIN      41
+#define SD_D2_PIN      48
+#define SD_D3_PIN      47
+
 #define NEOPIXEL_PIN   42
 #define BACKLIGHT_PIN  45
 

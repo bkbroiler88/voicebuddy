@@ -6,6 +6,9 @@
 #include "audio.h"
 #include "csi.h"
 #include "wifi_net.h"
+#include "sdcard.h"
+#include "version.h"
+#include <esp_ota_ops.h>
 #include "web.h"
 #include "certs.h"
 #include <WiFi.h>
@@ -90,6 +93,13 @@ static void subSess(char *b, size_t n) {
   int k = webSessionCount();
   if (k == 0) snprintf(b, n, "None"); else snprintf(b, n, "%d signed in", k);
 }
+
+static void subSd(char *b, size_t n) { sdStatus(b, n); }
+static void subFw(char *b, size_t n) { snprintf(b, n, "Running from %s", esp_ota_get_running_partition()->label); }
+static void btnFw(char *b, size_t n) { snprintf(b, n, "%s", FW_VERSION); }
+static void subMem(char *b, size_t n) { snprintf(b, n, "%u KB RAM, %u KB PSRAM free", ESP.getFreeHeap() / 1024, ESP.getFreePsram() / 1024); }
+static void aSdCheck() { say(sdBegin() ? "Card found" : "No card found"); }
+static void aSpeechTest() { speechTestEnter(); }
 
 static const char *const VIEWS[4] = {"Pup", "Dial", "Saturn", "Planets"};
 static void btnView(char *b, size_t n) { snprintf(b, n, "%s", VIEWS[constrain(g.view, 0, 3)]); }
@@ -246,12 +256,18 @@ static SRow tabSetup[] = {
   ACT("Redo room zones only", "After moving furniture or Buddy", nullptr, "Start", nullptr, aZones),
   PM("Calibrate dB readings", nullptr, subCal, &g.calOffset, 60, 140, 1, fNum, nullptr),
   ACT("Grown-up voices", nullptr, subParents, "Add", nullptr, aParent),
+};
+static SRow tabDevice[] = {
+  ACT("SD card", nullptr, subSd, "Check", nullptr, aSdCheck),
+  ACT("Speech test", "10 words, for the reading games", nullptr, "Start", nullptr, aSpeechTest),
+  INFO("Firmware", nullptr, subFw, btnFw),
+  INFO("Memory", nullptr, subMem, nullptr),
   ACT("Factory reset", "Erase everything and start over", nullptr, "Reset", nullptr, aFactory),
 };
 
 struct Tab { const char *name; SRow *rows; int n; };
 static Tab tabs[NTABS + 1] = {
-  {"Voice", tabVoice, 5}, {"Room", tabRoom, 5}, {"Stars", tabStars, 5}, {"Screen", tabScreen, 5}, {"Setup", tabSetup, 6},
+  {"Voice", tabVoice, 5}, {"Room", tabRoom, 5}, {"Stars", tabStars, 5}, {"Screen", tabScreen, 5}, {"Setup", tabSetup, 5}, {"Device", tabDevice, 5},
   {"WiFi & web control", tabWeb, 5},
 };
 
@@ -260,7 +276,7 @@ static int pitch() { return tabs[curTab].n > 5 ? 29 : 35; }
 static int ROW_Y(int i) { return 32 + i * pitch(); }
 static int ctlY(int y) { return y + (pitch() > 30 ? 5 : 3); }
 static int ctlH() { return pitch() > 30 ? 24 : 22; }
-#define TAB_W 64
+#define TAB_W (320 / NTABS)
 
 // ---------------- drawing ----------------
 static void drawSub(int i) {
@@ -296,6 +312,7 @@ static void drawControl(int i) {
       drawButton(212, ctlY(y), 100, ctlH(), b, r.act == aFactory ? C_LOUD : C_BTN, C_BTN_TX);
       break;
     case K_INFO:
+      if (!r.btnFn) break;
       r.btnFn(b, sizeof(b));
       tft.fillRect(206, y + 2, 110, pitch() - 4, C_SCREEN);
       tft.setTextDatum(MR_DATUM);
@@ -331,6 +348,7 @@ static void drawFooter() {
     case TAB_STARS:  snprintf(b, sizeof(b), "Today: %d of %d stars", g.stars, g.dailyGoal); break;
     case TAB_SCREEN: snprintf(b, sizeof(b), "Saved when you tap Done"); break;
     case TAB_WEB:    snprintf(b, sizeof(b), g.webOn ? "Sign-in uses the parent PIN" : "Buddy works the same with it off"); break;
+    case TAB_DEVICE: snprintf(b, sizeof(b), "Voice Buddy %s", FW_VERSION); break;
     default:         snprintf(b, sizeof(b), g.setupDone ? "Setup is done" : "Setup isn't finished yet"); break;
   }
   tft.fillRect(0, 210, 236, 30, C_SCREEN);

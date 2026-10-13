@@ -1,5 +1,6 @@
 #include "audio.h"
 #include "config.h"
+#include "speech.h"
 #include <Wire.h>
 #include <ESP_I2S.h>
 
@@ -14,6 +15,8 @@ static volatile bool  s_speech   = false;
 static volatile float s_vadThresh = 0.50f;
 static volatile float s_noiseMargin = 6.f;
 volatile int16_t g_rawMinL, g_rawMaxL, g_rawMinR, g_rawMaxR;   // diagnostics
+volatile bool g_srSlotR = false;                                // which I2S slot feeds the recognizer
+volatile uint32_t g_rawPpL = 0, g_rawPpR = 0;                    // mean peak-to-peak per slot, last second
 static volatile bool  s_chimeReq = false;
 static bool s_codecOk = false;
 
@@ -219,6 +222,22 @@ static void audioTask(void *) {
       mnR = min(mnR, rx[2 * i + 1]); mxR = max(mxR, rx[2 * i + 1]);
     }
     g_rawMinL = mnL; g_rawMaxL = mxL; g_rawMinR = mnR; g_rawMaxR = mxR;
+    {   // raw mono copy for the speech recognizer (it wants unfiltered audio). The ES8311 is a
+        // mono ADC and only one I2S slot carries it, so feed whichever slot had more signal over
+        // the last second (sticky, 2:1 hysteresis) instead of assuming the left one.
+      static int16_t mono[AUDIO_FRAMES];
+      static uint32_t ppL = 0, ppR = 0;
+      static int blocks = 0;
+      static bool useR = false;
+      ppL += (uint32_t)(mxL - mnL); ppR += (uint32_t)(mxR - mnR);
+      if (++blocks >= 60) {
+        if (ppR > 2 * ppL) useR = true; else if (ppL > 2 * ppR) useR = false;
+        g_srSlotR = useR; g_rawPpL = ppL / blocks; g_rawPpR = ppR / blocks;
+        ppL = ppR = 0; blocks = 0;
+      }
+      for (int i = 0; i < n; i++) mono[i] = rx[2 * i + (useR ? 1 : 0)];
+      speechFeed(mono, n);
+    }
     for (int i = 0; i < n; i++) {
       float l = lpL.run(hpL.run(rx[2 * i]));
       float r = lpR.run(hpR.run(rx[2 * i + 1]));

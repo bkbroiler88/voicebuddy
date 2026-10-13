@@ -16,3 +16,7 @@ bool  audioSpeechActive();           // voice heard within the last 0.3 s
 void  audioSetPitchBand(int loHz, int hiHz);   // only accept voices in this pitch range (0,0 = any)
 float audioPitchHz();                // pitch of the last voiced frame
 void  audioChime();                 // short two-note "you earned a star" sound
+
+// diagnostics from the mic task
+extern volatile bool g_srSlotR;              // which I2S slot feeds the recognizer
+extern volatile uint32_t g_rawPpL, g_rawPpR;  // mean raw peak-to-peak per slot, last second

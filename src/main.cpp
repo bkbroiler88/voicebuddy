@@ -29,6 +29,8 @@
 #include "buddy.h"
 #include "ui.h"
 #include "web.h"
+#include "sdcard.h"
+#include "speech.h"
 #include "certs.h"
 #include "history.h"
 #include "version.h"
@@ -600,6 +602,7 @@ void setup() {
   }
 
   storageBegin();
+  sdBegin();
   webBegin();
   Serial.printf("[boot] Voice Buddy %s from %s\n", FW_VERSION, esp_ota_get_running_partition()->label);
   csiModelLoad();
@@ -802,6 +805,12 @@ void loop() {
       lastFrame = now;
       break;
 
+    case SCR_SPEECHTEST:
+      if (pressed) speechTestTap(tx, ty);
+      if (screen == SCR_SPEECHTEST) speechTestTick();
+      lastFrame = now;
+      break;
+
     case SCR_WIZARD:
       if (pressed) wizardTap(tx, ty);
       if (screen == SCR_WIZARD) wizardTick();
@@ -846,6 +855,10 @@ void loop() {
       g.webOn = on && certEnsure();
       settingsSave();
       Serial.printf("[web] web control %s\n", g.webOn ? "ON" : "OFF");
+    } else if (c == 'V') {
+      demoMood = -1;
+      speechTestEnter();
+      speechTestTap(260, 215);   // straight to Start, for testing over USB
     } else if (c == 'T') {
       // T<tab>: open a settings tab (0 Voice, 1 Room, 2 Stars, 3 Screen, 4 Setup)
       int t = Serial.read() - '0';
