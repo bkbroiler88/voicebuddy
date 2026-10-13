@@ -34,8 +34,12 @@ static const char *note = nullptr;
 static bool zonesTouched = false;
 
 // WiFi
-static ApInfo aps[6];
-static int apCount = 0, apSel = 0;
+#define AP_MAX  12
+#define AP_ROWS 4
+#define AP_Y0   66
+#define AP_ROWH 24
+static ApInfo aps[AP_MAX];
+static int apCount = 0, apSel = 0, apTop = 0;   // apTop = first row shown
 static char pw[65];
 static bool pwShow = false;
 
@@ -252,26 +256,33 @@ static void saveResults() {
 // ---------------------------------------------------------------- WiFi list
 static bool needScan = true;
 
-// the network rows + hints (redrawn on a tap without rescanning)
+// the network rows (AP_ROWS per page, scrolled with the arrows on the right) + hints;
+// redrawn on a tap without rescanning
 static void drawWifiRows() {
-  tft.fillRect(0, 54, 320, 140, C_SCREEN);
-  line("Buddy uses WiFi to sense where your child is.", 62, C_DIM);
-  for (int i = 0; i < apCount; i++) {
-    int y = 74 + i * 24;
+  tft.fillRect(0, 50, 320, 144, C_SCREEN);
+  if (apSel < apTop) apTop = apSel;
+  if (apSel >= apTop + AP_ROWS) apTop = apSel - AP_ROWS + 1;
+  for (int i = apTop; i < apCount && i < apTop + AP_ROWS; i++) {
+    int y = AP_Y0 + (i - apTop) * AP_ROWH;
     bool sel = i == apSel;
     uint16_t bg = sel ? rgb(223, 231, 242) : TFT_WHITE;
-    tft.fillRoundRect(20, y, 280, 21, 6, bg);
-    tft.drawRoundRect(20, y, 280, 21, 6, sel ? C_BTN : C_PANEL);
+    tft.fillRoundRect(16, y, 254, 21, 6, bg);
+    tft.drawRoundRect(16, y, 254, 21, 6, sel ? C_BTN : C_PANEL);
     tft.setTextDatum(ML_DATUM); tft.setTextColor(C_TEXT, bg);
     char b[48];
     bool cur = netConnected() && !strcmp(aps[i].ssid, netSsid());
-    snprintf(b, sizeof(b), "%s%s", aps[i].ssid, cur ? "  (connected)" : "");
-    tft.drawString(b, 30, y + 11, 2);
+    snprintf(b, sizeof(b), "%.22s%s", aps[i].ssid, cur ? " (connected)" : "");
+    tft.drawString(b, 26, y + 11, 2);
     int bars = aps[i].rssi > -55 ? 4 : aps[i].rssi > -65 ? 3 : aps[i].rssi > -75 ? 2 : 1;
-    for (int k = 0; k < 4; k++) tft.fillRect(268 + k * 6, y + 17 - (k + 1) * 3, 4, (k + 1) * 3, k < bars ? C_TEXT : C_PANEL);
+    for (int k = 0; k < 4; k++) tft.fillRect(240 + k * 6, y + 17 - (k + 1) * 3, 4, (k + 1) * 3, k < bars ? C_TEXT : C_PANEL);
   }
-  if (!apCount) line("No networks found. Tap Search again.", 120, C_LOUD);
-  line("Tap a network, then Next. Only 2.4 GHz networks show up.", 188, C_DIM);
+  if (apCount > AP_ROWS) {
+    bool up = apTop > 0, down = apTop + AP_ROWS < apCount;
+    drawButton(278, AP_Y0, 34, 44, "^", up ? C_BTN : C_PANEL, up ? C_BTN_TX : C_DIM);
+    drawButton(278, AP_Y0 + 2 * AP_ROWH, 34, 44, "v", down ? C_BTN : C_PANEL, down ? C_BTN_TX : C_DIM);
+  }
+  if (!apCount) line("No networks found. Tap Search again.", 110, C_LOUD);
+  line("Tap your network, then Next (2.4 GHz only)", 176, C_DIM);
 }
 
 // ---------------------------------------------------------------- screens
@@ -317,8 +328,8 @@ static void drawStep() {
       frame("Connect to WiFi");
       if (needScan) {                 // scan only when the screen opens or on request, never on a tap
         line("Searching for networks...", 110, C_DIM);
-        apCount = netScan(aps, 5);
-        apSel = 0;
+        apCount = netScan(aps, AP_MAX);
+        apSel = 0; apTop = 0;
         if (netHasCreds()) for (int i = 0; i < apCount; i++) if (!strcmp(aps[i].ssid, netSsid())) apSel = i;
         needScan = false;
       }
@@ -512,7 +523,18 @@ void wizardTap(int x, int y) {
       break;
 
     case S_WIFI_LIST:
-      if (y >= 74 && y < 74 + apCount * 24 && x >= 20 && x <= 300) { apSel = (y - 74) / 24; drawWifiRows(); return; }
+      if (x >= 274 && apCount > AP_ROWS && y >= AP_Y0 && y < AP_Y0 + 4 * AP_ROWH) {   // scroll arrows
+        if (y < AP_Y0 + 2 * AP_ROWH) apTop = max(0, apTop - AP_ROWS);
+        else apTop = min(apCount - AP_ROWS, apTop + AP_ROWS);
+        if (apSel < apTop || apSel >= apTop + AP_ROWS) apSel = apTop;
+        drawWifiRows();
+        return;
+      }
+      if (y >= AP_Y0 && y < AP_Y0 + AP_ROWS * AP_ROWH && x >= 16 && x <= 270) {
+        int i = apTop + (y - AP_Y0) / AP_ROWH;
+        if (i < apCount) { apSel = i; drawWifiRows(); }
+        return;
+      }
       if (left) { if (mode == WIZ_FULL) go(S_QUIET); else finish(); }
       else if (right) {
         if (!apCount) { needScan = true; drawStep(); return; }
